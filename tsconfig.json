@@ -28,7 +28,11 @@
     "**/*.tsx",
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts",
+    "src/**/*.tsx",
     "**/*.mts"
   ],
-  "exclude": ["node_modules"]
+  "exclude": [
+    "node_modules",
+    "Diseño de logo minimalista"
+  ]
 }
