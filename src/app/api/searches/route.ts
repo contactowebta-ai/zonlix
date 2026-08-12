@@ -109,6 +109,13 @@ export async function POST(request: NextRequest) {
       return Response.json({ error: "No se pudo obtener el perfil del usuario" }, { status: 500 });
     }
 
+    if (profile.credits_remaining <= 0) {
+      return Response.json(
+        { error: "INSUFFICIENT_CREDITS", message: "Has consumido tus créditos. Espera a tu fecha de renovación o contacta a soporte para un upgrade." },
+        { status: 403 }
+      );
+    }
+
     // 2. Validar body
     const body = await request.json();
     const parseResult = createSearchSchema.safeParse(body);
@@ -226,9 +233,15 @@ export async function POST(request: NextRequest) {
       const deliveredCount = cachedPlaces.length;
       const actualCost = calculateSearchCreditCost(deliveredCount);
       if (actualCost > 0) {
-        await (supabase.from("profiles") as any)
-          .update({ credits_remaining: profile.credits_remaining - actualCost })
-          .eq("id", user.id);
+        const { data: newBalance, error: rpcError } = await (supabase as any)
+          .rpc('decrement_credits', { p_user_id: user.id, p_amount: actualCost });
+          
+        if (rpcError || newBalance === null) {
+          return Response.json(
+            { error: "INSUFFICIENT_CREDITS", message: "Créditos insuficientes para procesar los resultados de la caché." },
+            { status: 403 }
+          );
+        }
         revalidatePath('/', 'layout');
       }
 
@@ -279,7 +292,8 @@ export async function POST(request: NextRequest) {
           status: "error",
           error_mensaje: "Los motores de búsqueda están experimentando una alta demanda temporal.",
         })
-        .eq("id", searchId);
+        .eq("id", searchId)
+        .eq("user_id", user.id);
 
       return Response.json({ 
         error: "APIFY_QUOTA_EXCEEDED", 
@@ -294,7 +308,8 @@ export async function POST(request: NextRequest) {
         apify_run_id: runId,
         apify_dataset_id: datasetId,
       })
-      .eq("id", searchId);
+      .eq("id", searchId)
+      .eq("user_id", user.id);
 
     return Response.json({
       status: "procesando",

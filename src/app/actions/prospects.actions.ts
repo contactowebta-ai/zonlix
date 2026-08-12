@@ -247,6 +247,7 @@ export async function importProspectToCRM(
   searchId: string,
   place: Partial<ApifyPlace>
 ): Promise<ActionResult<{ prospectId: string; alreadyImported?: boolean }>> {
+  let appliedCost = 0;
   try {
     const supabase = await createClient();
     const {
@@ -318,15 +319,22 @@ export async function importProspectToCRM(
           facebook_url: socialResult.facebook_url,
           instagram_url: socialResult.instagram_url,
         })
-        .eq("id", prospect.id);
+        .eq("id", prospect.id)
+        .eq("user_id", user.id);
       prospect.facebook_url = socialResult.facebook_url;
       prospect.instagram_url = socialResult.instagram_url;
     }
 
-    // 3.9 Verificar créditos antes del pipeline IA (evita gastar cuota sin saldo)
+    // 3.9 Verificar créditos antes del pipeline IA (optimistic lock)
     const auditCost = calculateAuditCreditCost(Boolean(prospect.sitio_web));
-    if (profile && typeof profile.credits_remaining === 'number' && profile.credits_remaining < auditCost) {
-      return { success: false, error: "INSUFFICIENT_CREDITS" };
+    if (profile && typeof profile.credits_remaining === 'number') {
+      const { data: newBalance, error: rpcError } = await (supabase as any)
+        .rpc('decrement_credits', { p_user_id: user.id, p_amount: auditCost });
+        
+      if (rpcError || newBalance === null) {
+        return { success: false, error: "INSUFFICIENT_CREDITS" };
+      }
+      appliedCost = auditCost;
     }
 
     // 4. Scrape + Auditoría para este prospecto
@@ -356,14 +364,6 @@ export async function importProspectToCRM(
       { onConflict: "prospect_id" }
     );
 
-    // La generación de mensajes ahora es bajo demanda, por lo que ya no se llama a generateMessages aquí.
-
-    if (profile && typeof profile.credits_remaining === 'number') {
-      await (supabase.from("profiles") as any)
-        .update({ credits_remaining: Math.max(0, profile.credits_remaining - auditCost) })
-        .eq("id", user.id);
-    }
-
     revalidatePath("/prospectos");
     revalidatePath(`/prospectos/${prospect.id}`);
     revalidatePath("/crm");
@@ -375,6 +375,14 @@ export async function importProspectToCRM(
       data: { prospectId: prospect.id },
     };
   } catch (err: any) {
+    if (appliedCost > 0) {
+      const supabase = await createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        await (supabase as any).rpc('increment_credits', { p_user_id: user.id, p_amount: appliedCost });
+      }
+    }
+
     if (err?.message?.includes("429") || err?.message?.includes("quota") || err?.message?.includes("rate limit")) {
       return { success: false, error: "Has alcanzado el límite de consultas por minuto. Espera 1 minuto y haz clic en 'Reintentar Auditoría'." };
     }
@@ -483,6 +491,7 @@ export async function updateSocialMediaUrls(
 }
 
 export async function retryAudit(prospectId: string): Promise<ActionResult> {
+  let appliedCost = 0;
   try {
     const supabase = await createClient();
     const { data: { user }, error: authError } = await supabase.auth.getUser();
@@ -509,10 +518,16 @@ export async function retryAudit(prospectId: string): Promise<ActionResult> {
       .single();
     const profile = profileRaw as ProfileRow | null;
 
-    // 1.5 Verificar créditos antes del pipeline IA (evita gastar cuota sin saldo)
+    // 1.5 Verificar créditos antes del pipeline IA (optimistic lock)
     const auditCost = calculateAuditCreditCost(Boolean(prospect.sitio_web));
-    if (profile && typeof profile.credits_remaining === 'number' && profile.credits_remaining < auditCost) {
-      return { success: false, error: "INSUFFICIENT_CREDITS" };
+    if (profile && typeof profile.credits_remaining === 'number') {
+      const { data: newBalance, error: rpcError } = await (supabase as any)
+        .rpc('decrement_credits', { p_user_id: user.id, p_amount: auditCost });
+        
+      if (rpcError || newBalance === null) {
+        return { success: false, error: "INSUFFICIENT_CREDITS" };
+      }
+      appliedCost = auditCost;
     }
 
     // 2. Scrape y Auditoría
@@ -541,19 +556,19 @@ export async function retryAudit(prospectId: string): Promise<ActionResult> {
       { onConflict: "prospect_id" }
     );
 
-    // Mensajes se generan bajo demanda, no se autogeneran en reintentos.
-
-    if (profile && typeof profile.credits_remaining === 'number') {
-      await (supabase.from("profiles") as any)
-        .update({ credits_remaining: Math.max(0, profile.credits_remaining - auditCost) })
-        .eq("id", user.id);
-    }
-
     revalidatePath(`/prospectos/${prospect.id}`);
     revalidatePath("/", "layout");
     
     return { success: true };
   } catch (err: any) {
+    if (appliedCost > 0) {
+      const supabase = await createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        await (supabase as any).rpc('increment_credits', { p_user_id: user.id, p_amount: appliedCost });
+      }
+    }
+
     if (err?.message?.includes("429") || err?.message?.includes("quota") || err?.message?.includes("rate limit")) {
       return { success: false, error: "Has alcanzado el límite de consultas por minuto. Espera 1 minuto y haz clic en 'Reintentar Auditoría'." };
     }
@@ -565,6 +580,7 @@ export async function retryAudit(prospectId: string): Promise<ActionResult> {
 }
 
 export async function generateOnDemandProspectMessage(prospectId: string): Promise<ActionResult & { messages?: any }> {
+  let appliedCost = 0;
   try {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
@@ -592,6 +608,18 @@ export async function generateOnDemandProspectMessage(prospectId: string): Promi
       .single();
     if (!auditRaw) return { success: false, error: "Auditoría no encontrada. Por favor, realiza una auditoría primero." };
     const audit = auditRaw;
+
+    // Bloqueo optimista (1 crédito por generación)
+    const cost = 1;
+    if (typeof profile.credits_remaining === 'number') {
+      const { data: newBalance, error: rpcError } = await (supabase as any)
+        .rpc('decrement_credits', { p_user_id: user.id, p_amount: cost });
+        
+      if (rpcError || newBalance === null) {
+        return { success: false, error: "INSUFFICIENT_CREDITS" };
+      }
+      appliedCost = cost;
+    }
 
     const { generateMessages } = await import("@/lib/gemini");
     const messages = await generateMessages(profile, prospect, audit);
@@ -622,7 +650,7 @@ export async function generateOnDemandProspectMessage(prospectId: string): Promi
     ];
 
     // Primero borramos los anteriores por si es una re-generación
-    await (supabase.from("messages") as any).delete().eq("prospect_id", prospectId);
+    await (supabase.from("messages") as any).delete().eq("prospect_id", prospectId).eq("user_id", user.id);
     
     // Y luego insertamos los nuevos
     await (supabase.from("messages") as any).insert(messagesToInsert);
@@ -630,7 +658,15 @@ export async function generateOnDemandProspectMessage(prospectId: string): Promi
     revalidatePath(`/prospectos/${prospectId}`);
     return { success: true, messages };
   } catch (err: any) {
+    if (appliedCost > 0) {
+      const supabase = await createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        await (supabase as any).rpc('increment_credits', { p_user_id: user.id, p_amount: appliedCost });
+      }
+    }
+
     console.error("[generateOnDemand] Error:", err);
-    return { success: false, error: "Error al generar mensajes" };
+    return { success: false, error: "Error al generar mensajes. Tu crédito fue devuelto." };
   }
 }

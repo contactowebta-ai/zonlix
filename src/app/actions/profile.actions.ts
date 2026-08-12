@@ -92,11 +92,18 @@ export async function reAuditProfile(): Promise<ActionResult<ProfileRow>> {
       return { success: false, error: "No se encontró el perfil" };
     }
 
-    if ((profileRaw.credits_remaining ?? 0) <= 0) {
+    let diagnostico_ia = null;
+    let appliedCost = 0;
+    
+    // Optimistic lock
+    const { data: newBalance, error: rpcError } = await (supabase as any)
+      .rpc('decrement_credits', { p_user_id: user.id, p_amount: 1 });
+      
+    if (rpcError || newBalance === null) {
       return { success: false, error: "INSUFFICIENT_CREDITS" };
     }
+    appliedCost = 1;
 
-    let diagnostico_ia = null;
     try {
       const { auditAgencyWithAI } = await import("@/lib/gemini");
       diagnostico_ia = await auditAgencyWithAI(profileRaw);
@@ -104,6 +111,9 @@ export async function reAuditProfile(): Promise<ActionResult<ProfileRow>> {
         throw new Error("Límite de procesamiento alcanzado");
       }
     } catch (auditErr: any) {
+      if (appliedCost > 0) {
+        await (supabase as any).rpc('increment_credits', { p_user_id: user.id, p_amount: appliedCost });
+      }
       console.error("[reAuditProfile] Error en auditoría de agencia:", auditErr);
       
       const errorMessage = auditErr?.message || "";
@@ -117,8 +127,7 @@ export async function reAuditProfile(): Promise<ActionResult<ProfileRow>> {
     const { data, error } = await (supabase.from("profiles") as any)
       .update({ 
         diagnostico_ia, 
-        updated_at: new Date().toISOString(),
-        credits_remaining: Math.max(0, (profileRaw.credits_remaining ?? 0) - 1)
+        updated_at: new Date().toISOString()
       })
       .eq("id", user.id)
       .select()

@@ -46,15 +46,7 @@ const GEMINI_MODELS = [
 
 async function getGenAIClient() {
   const rawKey = process.env.GOOGLE_GEMINI_API_KEY || process.env.GEMINI_API_KEY || '';
-  let apiKey = rawKey.replace(/^export\s+/, '').replace(/^["']|["']$/g, '').trim();
-
-  try {
-    const cookieStore = await cookies();
-    const customKey = cookieStore.get("zonlix_gemini_key")?.value;
-    if (customKey) apiKey = customKey;
-  } catch (e) {
-    // IGNORAR: Solo falla fuera del entorno de Next.js válido
-  }
+  const apiKey = rawKey.replace(/^export\s+/, '').replace(/^["']|["']$/g, '').trim();
 
   console.log("[GEMINI] Inicializando con Key de longitud:", apiKey.length);
   return new GoogleGenerativeAI(apiKey);

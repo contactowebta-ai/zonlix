@@ -163,10 +163,7 @@ export async function processSearchDataset(searchId: string, datasetId: string):
   const actualCost = calculateSearchCreditCost(newProspectsCount);
 
   if (actualCost > 0) {
-    const { data: profile } = await (supabase.from("profiles") as any).select("credits_remaining").eq("id", searchRaw.user_id).single();
-    if (profile) {
-      await (supabase.from("profiles") as any).update({ credits_remaining: profile.credits_remaining - actualCost }).eq("id", searchRaw.user_id);
-    }
+    await (supabase as any).rpc('decrement_credits', { p_user_id: searchRaw.user_id, p_amount: actualCost });
   }
 
   const originalQuery = (searchRaw.results_json as any)?.originalQuery;
@@ -178,7 +175,8 @@ export async function processSearchDataset(searchId: string, datasetId: string):
       total_resultados: prospects.length,
       results_json: { data: prospects, _limit: originalLimit, originalQuery, originalLocation },
     })
-    .eq("id", searchId);
+    .eq("id", searchId)
+    .eq("user_id", searchRaw.user_id);
 
 
 

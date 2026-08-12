@@ -127,7 +127,11 @@ export function ProspectDetailCard({
       if (res.success) {
         toast.success("Mensajes generados con IA ✨");
       } else {
-        toast.error(res.error || "Error al generar mensajes");
+        if (res.error === "INSUFFICIENT_CREDITS") {
+          toast.error("Créditos insuficientes. Por favor, recarga tu cuenta.");
+        } else {
+          toast.error(res.error || "Error al generar mensajes");
+        }
       }
     });
   };
@@ -140,7 +144,11 @@ export function ProspectDetailCard({
       if (res.success) {
         toast.success("Auditoría generada con éxito.");
       } else {
-        toast.error(res.error || "Error al reintentar auditoría.");
+        if (res.error === "INSUFFICIENT_CREDITS") {
+          toast.error("Créditos insuficientes. Por favor, recarga tu cuenta.");
+        } else {
+          toast.error(res.error || "Error al reintentar auditoría.");
+        }
       }
     });
   };

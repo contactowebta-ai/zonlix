@@ -85,7 +85,8 @@ export async function generateObjectionOptions(
     if (prospect.status === "nuevo" || prospect.status === "contactado") {
       await (supabase.from("prospects") as any)
         .update({ status: "en_conversacion", updated_at: new Date().toISOString() })
-        .eq("id", prospectId);
+        .eq("id", prospectId)
+        .eq("user_id", user.id);
     }
 
     revalidatePath("/prospectos");
