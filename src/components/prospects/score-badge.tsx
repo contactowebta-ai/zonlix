@@ -33,7 +33,7 @@ export function ScoreBadge({ score, tier, showOpportunityLabel = false }: ScoreB
   };
 
   return (
-    <Badge variant={variantMap[tier] || "outline"} className="font-semibold px-2.5 py-0.5">
+    <Badge variant={variantMap[tier] || "outline"} className="font-semibold px-2.5 py-0.5 whitespace-nowrap shrink-0">
       Score: {score}/10 {showOpportunityLabel && `• ${labelMap[tier]}`}
     </Badge>
   );

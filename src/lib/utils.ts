@@ -124,3 +124,54 @@ export const prospectStatusLabels: Record<string, string> = {
   cerrado_ganado: "Cerrado (ganado)",
   cerrado_perdido: "Cerrado (perdido)",
 }
+
+/**
+ * Limpia una URL removiendo parámetros de rastreo innecesarios y barras finales.
+ */
+export function cleanSocialUrl(url: string | null | undefined): string {
+  if (!url) return '';
+  try {
+    const parsed = new URL(url.startsWith('http') ? url : `https://${url}`);
+    // Limpia query params como utm_*, igsh, fbclid, etc.
+    return `${parsed.origin}${parsed.pathname}`.replace(/\/$/, '');
+  } catch {
+    // Si no es una URL válida aún, trunca query params con regex
+    return url.split('?')[0].replace(/\/$/, '');
+  }
+}
+
+/**
+ * Normaliza y limpia los nombres de empresas provenientes de Google Maps.
+ */
+export function sanitizeCompanyName(rawName: string | null | undefined): string {
+  if (!rawName) return 'Empresa';
+
+  let cleaned = rawName.trim();
+
+  // 1. Recortar descripciones largas o subtítulos después de guiones, pipes o dos puntos
+  cleaned = cleaned.split(' - ')[0].split(' | ')[0].split(' : ')[0].split('–')[0].trim();
+
+  // 2. Remover figuras legales comunes
+  const legalRegex = /\b(S\.?A\.?\s+DE\s+C\.?V\.?|S\.?A\.?|S\.?\s+DE\s+R\.?L\.?\s+DE\s+C\.?V\.?|S\.?\s+DE\s+R\.?L\.?|S\.?A\.?P\.?I\.?\s+DE\s+C\.?V\.?|S\.?C\.?|A\.?C\.?|E\.?I\.?R\.?L\.?)\b/gi;
+  cleaned = cleaned.replace(legalRegex, '').trim();
+
+  // 3. Limpiar puntos dobles o puntuación final sobrante
+  cleaned = cleaned.replace(/\.\.+/g, '.');
+  cleaned = cleaned.replace(/[-,\.]+$|^\s*[-,\.]+/g, '').trim();
+
+  return cleaned || rawName.trim();
+}
+
+/**
+ * Obtiene el dominio limpio de una URL (sin www., protocolos ni parámetros).
+ */
+export function getCleanDomain(url: string | null | undefined): string {
+  if (!url) return '';
+  try {
+    const formattedUrl = url.startsWith('http://') || url.startsWith('https://') ? url : `https://${url}`;
+    const parsed = new URL(formattedUrl);
+    return parsed.hostname.replace(/^www\./, '');
+  } catch {
+    return url.split('?')[0].replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
+  }
+}

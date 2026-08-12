@@ -1,4 +1,5 @@
 "use client";
+import { cn, getCleanDomain } from "@/lib/utils";
 
 import React, { useState, useTransition } from "react";
 import Link from "next/link";
@@ -15,7 +16,7 @@ import { ScoreBadge } from "@/components/prospects/score-badge";
 import { StatusSelect } from "@/components/prospects/status-select";
 import { WhatsAppButton } from "@/components/prospects/whatsapp-button";
 import { ObjectionModal } from "@/components/copilot/objection-modal";
-import { updateMessageContent, refetchSocialMedia, retryAudit, updateSocialMediaUrls } from "@/app/actions/prospects.actions";
+import { updateMessageContent, refetchSocialMedia, retryAudit, updateSocialMediaUrls, generateOnDemandProspectMessage } from "@/app/actions/prospects.actions";
 import { crearSeguimiento, completarSeguimiento } from "@/app/actions/follow-ups.actions";
 import {
   Globe,
@@ -114,6 +115,19 @@ export function ProspectDetailCard({
         }
       } else {
         toast.error(res.error || "Error al buscar redes sociales");
+      }
+    });
+  };
+
+  const [isGenerating, startGeneratingTransition] = useTransition();
+
+  const handleGenerateMessages = () => {
+    startGeneratingTransition(async () => {
+      const res = await generateOnDemandProspectMessage(prospect.id);
+      if (res.success) {
+        toast.success("Mensajes generados con IA ✨");
+      } else {
+        toast.error(res.error || "Error al generar mensajes");
       }
     });
   };
@@ -253,15 +267,16 @@ export function ProspectDetailCard({
               <Globe className="w-4 h-4 text-primary shrink-0" />
               {prospect.sitio_web ? (
                 <a
-                  href={prospect.sitio_web}
+                  href={prospect.sitio_web.startsWith('http') ? prospect.sitio_web : `https://${prospect.sitio_web}`}
                   target="_blank"
-                  rel="noreferrer"
-                  className="hover:underline text-foreground truncate"
+                  rel="noopener noreferrer"
+                  className="text-xs text-emerald-400 hover:underline font-mono truncate max-w-[200px] inline-block"
+                  title={prospect.sitio_web}
                 >
-                  {prospect.sitio_web}
+                  {getCleanDomain(prospect.sitio_web)}
                 </a>
               ) : (
-                <span className="italic">Sin sitio web</span>
+                <span className="text-xs text-zinc-500">Sin sitio web</span>
               )}
             </div>
 
@@ -497,6 +512,7 @@ export function ProspectDetailCard({
       </div>
 
       {/* Tabs de Mensajes Generados */}
+      {/* Tabs de Mensajes Generados */}
       <Card className="bg-white border border-neutral-200/80 shadow-[0_2px_10px_rgba(0,0,0,0.03)] rounded-2xl">
         <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
@@ -505,11 +521,44 @@ export function ProspectDetailCard({
               Copywriting generado usando la fórmula: Gancho → Punto de dolor → Solución → CTA suave.
             </CardDescription>
           </div>
-          <ObjectionModal prospect={prospect} />
+          <div className="flex items-center gap-2">
+            {messages.length > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleGenerateMessages}
+                disabled={isGenerating}
+                className="h-8 text-xs bg-white text-slate-600 hover:text-emerald-600"
+              >
+                <RefreshCw className={cn("w-3.5 h-3.5 mr-1.5", isGenerating && "animate-spin")} />
+                Regenerar con IA
+              </Button>
+            )}
+            <ObjectionModal prospect={prospect} />
+          </div>
         </CardHeader>
         <CardContent>
-          <Tabs defaultValue={defaultTab} className="w-full">
-            <TabsList className="grid grid-cols-3 w-full sm:w-[400px]">
+          {messages.length === 0 ? (
+            <div className="flex flex-col items-center justify-center p-6 bg-zinc-900/40 rounded-lg border border-dashed border-zinc-800 text-center">
+              <Sparkles className="w-6 h-6 text-emerald-400 mb-2"/>
+              <p className="text-xs text-zinc-400 mb-3">Redacta una propuesta comercial hiper-personalizada con IA para {prospect.nombre_empresa}.</p>
+              <Button className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium" disabled={isGenerating} onClick={handleGenerateMessages}>
+                {isGenerating ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin mr-2"/>
+                    Generando propuesta...
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-3.5 h-3.5 mr-2"/>
+                    Generar Mensaje con IA
+                  </>
+                )}
+              </Button>
+            </div>
+          ) : (
+            <Tabs defaultValue={defaultTab} className="w-full">
+              <TabsList className="grid grid-cols-3 w-full sm:w-[400px]">
               <TabsTrigger value="whatsapp" className="text-xs flex items-center gap-1.5">
                 <MessageSquare className="w-3.5 h-3.5" />
                 WhatsApp
@@ -581,7 +630,7 @@ export function ProspectDetailCard({
                   />
                 ) : (
                   <p className="text-xs text-foreground bg-muted/20 p-4 rounded-lg border border-border whitespace-pre-wrap leading-relaxed">
-                    {currentWaContent ?? "Generando mensaje..."}
+                    {currentWaContent ?? "No hay mensaje disponible."}
                   </p>
                 )}
               </div>
@@ -637,14 +686,14 @@ export function ProspectDetailCard({
 
                 {editingChannel === "email" ? (
                   <Textarea
-                    rows={6}
+                    rows={8}
                     value={editedContent}
                     onChange={(e) => setEditedContent(e.target.value)}
                     className="text-xs font-mono"
                   />
                 ) : (
                   <p className="text-xs text-foreground bg-muted/20 p-4 rounded-lg border border-border whitespace-pre-wrap leading-relaxed">
-                    {currentEmailContent ?? "Generando email..."}
+                    {currentEmailContent ?? "No hay mensaje disponible."}
                   </p>
                 )}
               </div>
@@ -707,13 +756,14 @@ export function ProspectDetailCard({
                   />
                 ) : (
                   <p className="text-xs text-foreground bg-muted/20 p-4 rounded-lg border border-border whitespace-pre-wrap leading-relaxed">
-                    {currentPhoneContent ?? "Generando guion..."}
+                    {currentPhoneContent ?? "No hay guion disponible."}
                   </p>
                 )}
               </div>
             </TabsContent>
 
           </Tabs>
+          )}
         </CardContent>
       </Card>
 

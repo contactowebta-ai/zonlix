@@ -49,6 +49,8 @@ export async function updateSession(request: NextRequest) {
     "/buscar",
     "/prospectos",
     "/crm",
+    "/configuracion",
+    "/resultados",
   ];
 
   const isProtected = protectedPaths.some((path) =>

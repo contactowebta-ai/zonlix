@@ -8,6 +8,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { prospectStatusSchema, type ActionResult, type ProspectStatus } from "@/types";
+import { calculateSearchCreditCost, calculateAuditCreditCost } from "@/lib/credits";
 
 import { revalidatePath } from "next/cache";
 import type { ProfileRow, ProspectRow } from "@/types/database.types";
@@ -111,7 +112,21 @@ export async function checkSearchFallback(searchId: string): Promise<ActionResul
           .eq("id", searchId);
         return { success: false, error: `Apify run terminó con estado: ${runStatus}` };
       }
-      return { success: true, data: { status: "procesando", apifyStatus: runStatus } };
+      
+      // Consultar avance parcial
+      let partialCount = 0;
+      const partialDatasetId = runData.data?.defaultDatasetId || datasetId;
+      if (partialDatasetId) {
+        try {
+          const { getDatasetItems } = await import("@/lib/apify");
+          const items = await getDatasetItems(partialDatasetId);
+          partialCount = items.length;
+        } catch (e) {
+          console.warn("[checkSearchFallback] No se pudo obtener avance parcial:", e);
+        }
+      }
+      
+      return { success: true, data: { status: "procesando", apifyStatus: runStatus, partialCount } };
     }
 
     // 3. Run exitoso — obtener datasetId si no lo teníamos
@@ -123,103 +138,20 @@ export async function checkSearchFallback(searchId: string): Promise<ActionResul
       return { success: false, error: "No se pudo resolver el datasetId del run de Apify" };
     }
 
-    // 4. Descargar el dataset directamente
-    const { getDatasetItems } = await import("@/lib/apify");
-    const places = await getDatasetItems(datasetId);
-    console.log(`[checkSearchFallback] Dataset fetched: ${places.length} items`);
-
-    // 5. Mapear a formato limpio
-    let cleanItems = (places || []).map((item: any) => ({
-      placeId: item.placeId || item.id || String(Math.random()),
-      title: item.title || item.name || "Sin nombre",
-      categoryName: item.categoryName || item.category || searchRow.query || "",
-      address: item.address || item.street || "",
-      city: searchRow.ubicacion || "",
-      phone: item.phone || item.phoneUnformatted || "",
-      website: item.website || item.domain || null,
-      totalScore: item.totalScore || item.stars || 0,
-      reviewsCount: item.reviewsCount || item.reviews || 0,
-      url: item.url || item.googleMapsUrl || "",
-      location: item.location || null,
-    }));
-
-    let parsedJson: any = {};
-    if (typeof searchRow.results_json === "string") {
-      try { parsedJson = JSON.parse(searchRow.results_json); } catch(e) {}
-    } else {
-      parsedJson = searchRow.results_json || {};
-    }
-    const originalLimit = parsedJson?._limit || 20;
+    // 4. Procesar el dataset directamente
+    const { processSearchDataset } = await import("@/lib/apify");
+    const count = await processSearchDataset(searchId, datasetId);
 
     const adminSupabase = createServiceClient();
-    
-    // Buscar searches previas para extraer placeIds históricos y deduplicar GLOBALMENTE
-    const { data: pastSearches } = await (adminSupabase.from("searches") as any)
-      .select("results_json")
-      .eq("user_id", user.id)
-      .neq("id", searchId);
-
-    const historicalPlaceIds = new Set<string>();
-    if (pastSearches) {
-      for (const search of pastSearches) {
-        const arr = Array.isArray(search.results_json) ? search.results_json : (search.results_json as any)?.data;
-        if (Array.isArray(arr)) {
-          for (const item of arr) {
-            if (item.placeId) historicalPlaceIds.add(item.placeId);
-          }
-        }
-      }
-    }
-
-    // Filtrar duplicados históricos estrictamente
-    cleanItems = cleanItems.filter((item: any) => !historicalPlaceIds.has(item.placeId));
-
-    // Aplicar recorte estricto sobre prospectos NUEVOS
-    const slicedItems = cleanItems.slice(0, originalLimit);
-
-    const calculateSearchCreditCost = (limit: number): number => {
-      if (limit <= 0) return 0;
-      return Math.ceil(limit / 5);
-    };
-
-    const actualCost = calculateSearchCreditCost(slicedItems.length);
-
-    if (actualCost > 0) {
-      const { data: profile } = await (adminSupabase.from("profiles") as any).select("credits_remaining").eq("id", user.id).single();
-      if (profile) {
-        await (adminSupabase.from("profiles") as any).update({ credits_remaining: profile.credits_remaining - actualCost }).eq("id", user.id);
-      }
-    }
-
-    const originalQuery = (searchRow.results_json as any)?.originalQuery;
-    const originalLocation = (searchRow.results_json as any)?.originalLocation;
-
-    // 6. Actualizar en Supabase con service client (bypasa RLS)
-    const { error: updateError } = await (adminSupabase.from("searches") as any)
-      .update({
-        status: "completado",
-        total_resultados: slicedItems.length,
-        results_json: { data: slicedItems, _limit: originalLimit, originalQuery, originalLocation },
-        apify_dataset_id: datasetId,
-      })
+    await (adminSupabase.from("searches") as any)
+      .update({ apify_dataset_id: datasetId })
       .eq("id", searchId);
-
-    if (updateError) {
-      console.error("[checkSearchFallback] Supabase update error:", {
-        message: updateError.message,
-        details: updateError.details,
-        hint: updateError.hint,
-        code: updateError.code
-      });
-      return { success: false, error: "Error al guardar resultados en Supabase" };
-    }
-
 
     revalidatePath("/buscar");
     revalidatePath(`/prospectos`);
     revalidatePath("/", "layout");
 
-    return { success: true, data: { status: "completado", count: slicedItems.length } };
+    return { success: true, data: { status: "completado", count } };
   } catch (err) {
     console.error("[checkSearchFallback] Error:", err);
     return { success: false, error: err instanceof Error ? err.message : "Error inesperado" };
@@ -391,9 +323,15 @@ export async function importProspectToCRM(
       prospect.instagram_url = socialResult.instagram_url;
     }
 
-    // 4. Scrape + Auditoría + Generación de mensajes bajo demanda para este prospecto
+    // 3.9 Verificar créditos antes del pipeline IA (evita gastar cuota sin saldo)
+    const auditCost = calculateAuditCreditCost(Boolean(prospect.sitio_web));
+    if (profile && typeof profile.credits_remaining === 'number' && profile.credits_remaining < auditCost) {
+      return { success: false, error: "INSUFFICIENT_CREDITS" };
+    }
+
+    // 4. Scrape + Auditoría para este prospecto
     const { scrapeToMarkdown } = await import("@/lib/firecrawl");
-    const { auditWebsite, generateMessages } = await import("@/lib/gemini");
+    const { auditWebsite } = await import("@/lib/gemini");
 
     let markdown: string | null = null;
     if (prospect.sitio_web) {
@@ -418,40 +356,11 @@ export async function importProspectToCRM(
       { onConflict: "prospect_id" }
     );
 
-    // Generar mensajes si hay perfil
-    if (profile) {
-      const messages = await generateMessages(profile, prospect, auditResult);
-      const messagesToInsert = [
-        {
-          prospect_id: prospect.id,
-          user_id: user.id,
-          canal: "whatsapp" as const,
-          contenido: messages.whatsapp,
-          enviado: false,
-        },
-        {
-          prospect_id: prospect.id,
-          user_id: user.id,
-          canal: "email" as const,
-          contenido: `Asunto: ${messages.email.asunto}\n\n${messages.email.cuerpo}`,
-          variante: messages.email.asunto,
-          enviado: false,
-        },
-        {
-          prospect_id: prospect.id,
-          user_id: user.id,
-          canal: "llamada" as const,
-          contenido: messages.guion_telefonico,
-          enviado: false,
-        },
-      ];
-
-      await (supabase.from("messages") as any).insert(messagesToInsert);
-    }
+    // La generación de mensajes ahora es bajo demanda, por lo que ya no se llama a generateMessages aquí.
 
     if (profile && typeof profile.credits_remaining === 'number') {
       await (supabase.from("profiles") as any)
-        .update({ credits_remaining: Math.max(0, profile.credits_remaining - 1) })
+        .update({ credits_remaining: Math.max(0, profile.credits_remaining - auditCost) })
         .eq("id", user.id);
     }
 
@@ -600,9 +509,15 @@ export async function retryAudit(prospectId: string): Promise<ActionResult> {
       .single();
     const profile = profileRaw as ProfileRow | null;
 
+    // 1.5 Verificar créditos antes del pipeline IA (evita gastar cuota sin saldo)
+    const auditCost = calculateAuditCreditCost(Boolean(prospect.sitio_web));
+    if (profile && typeof profile.credits_remaining === 'number' && profile.credits_remaining < auditCost) {
+      return { success: false, error: "INSUFFICIENT_CREDITS" };
+    }
+
     // 2. Scrape y Auditoría
     const { scrapeToMarkdown } = await import("@/lib/firecrawl");
-    const { auditWebsite, generateMessages } = await import("@/lib/gemini");
+    const { auditWebsite } = await import("@/lib/gemini");
 
     let markdown: string | null = null;
     if (prospect.sitio_web) {
@@ -626,42 +541,11 @@ export async function retryAudit(prospectId: string): Promise<ActionResult> {
       { onConflict: "prospect_id" }
     );
 
-    // Generar mensajes
-    if (profile) {
-      const messages = await generateMessages(profile, prospect, auditResult);
-      const messagesToInsert = [
-        {
-          prospect_id: prospect.id,
-          user_id: user.id,
-          canal: "whatsapp" as const,
-          contenido: messages.whatsapp,
-          enviado: false,
-        },
-        {
-          prospect_id: prospect.id,
-          user_id: user.id,
-          canal: "email" as const,
-          contenido: `Asunto: ${messages.email.asunto}\n\n${messages.email.cuerpo}`,
-          variante: messages.email.asunto,
-          enviado: false,
-        },
-        {
-          prospect_id: prospect.id,
-          user_id: user.id,
-          canal: "llamada" as const,
-          contenido: messages.guion_telefonico,
-          enviado: false,
-        },
-      ];
-      
-      // Eliminar mensajes anteriores si existen
-      await (supabase.from("messages") as any).delete().eq("prospect_id", prospect.id);
-      await (supabase.from("messages") as any).insert(messagesToInsert);
-    }
+    // Mensajes se generan bajo demanda, no se autogeneran en reintentos.
 
     if (profile && typeof profile.credits_remaining === 'number') {
       await (supabase.from("profiles") as any)
-        .update({ credits_remaining: Math.max(0, profile.credits_remaining - 1) })
+        .update({ credits_remaining: Math.max(0, profile.credits_remaining - auditCost) })
         .eq("id", user.id);
     }
 
@@ -677,5 +561,76 @@ export async function retryAudit(prospectId: string): Promise<ActionResult> {
       success: false,
       error: err instanceof Error ? err.message : "Error al reintentar auditoría",
     };
+  }
+}
+
+export async function generateOnDemandProspectMessage(prospectId: string): Promise<ActionResult & { messages?: any }> {
+  try {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: "No autenticado" };
+
+    const { data: prospectRaw, error: prospectError } = await (supabase.from("prospects") as any)
+      .select("*")
+      .eq("id", prospectId)
+      .eq("user_id", user.id)
+      .single();
+
+    if (prospectError || !prospectRaw) return { success: false, error: "Prospecto no encontrado" };
+    const prospect = prospectRaw as ProspectRow;
+
+    const { data: profileRaw } = await (supabase.from("profiles") as any)
+      .select("*")
+      .eq("id", user.id)
+      .single();
+    if (!profileRaw) return { success: false, error: "Perfil no encontrado" };
+    const profile = profileRaw as ProfileRow;
+
+    const { data: auditRaw } = await (supabase.from("audits") as any)
+      .select("*")
+      .eq("prospect_id", prospectId)
+      .single();
+    if (!auditRaw) return { success: false, error: "Auditoría no encontrada. Por favor, realiza una auditoría primero." };
+    const audit = auditRaw;
+
+    const { generateMessages } = await import("@/lib/gemini");
+    const messages = await generateMessages(profile, prospect, audit);
+
+    const messagesToInsert = [
+      {
+        prospect_id: prospect.id,
+        user_id: user.id,
+        canal: "whatsapp" as const,
+        contenido: messages.whatsapp,
+        enviado: false,
+      },
+      {
+        prospect_id: prospect.id,
+        user_id: user.id,
+        canal: "email" as const,
+        contenido: `Asunto: ${messages.email.asunto}\n\n${messages.email.cuerpo}`,
+        variante: messages.email.asunto,
+        enviado: false,
+      },
+      {
+        prospect_id: prospect.id,
+        user_id: user.id,
+        canal: "llamada" as const,
+        contenido: messages.guion_telefonico,
+        enviado: false,
+      },
+    ];
+
+    // Primero borramos los anteriores por si es una re-generación
+    await (supabase.from("messages") as any).delete().eq("prospect_id", prospectId);
+    
+    // Y luego insertamos los nuevos
+    await (supabase.from("messages") as any).insert(messagesToInsert);
+
+    revalidatePath(`/prospectos/${prospectId}`);
+    return { success: true, messages };
+  } catch (err: any) {
+    console.error("[generateOnDemand] Error:", err);
+    return { success: false, error: "Error al generar mensajes" };
   }
 }

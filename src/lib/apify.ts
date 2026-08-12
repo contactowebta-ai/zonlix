@@ -13,6 +13,8 @@
 import { apifyPlaceSchema, type ApifyPlace } from "@/types/schemas";
 import { createServiceClient } from "@/lib/supabase/server";
 import { normalizeSearchKey, setCachedSearch } from "@/lib/redis-cache";
+import { calculateSearchCreditCost } from "@/lib/credits";
+import { sanitizeCompanyName } from "@/lib/utils";
 
 const APIFY_BASE_URL = "https://api.apify.com/v2";
 const APIFY_API_TOKEN = process.env.APIFY_API_TOKEN!;
@@ -102,7 +104,7 @@ export async function processSearchDataset(searchId: string, datasetId: string):
 
   let prospects = places.map((item: any) => ({
     placeId: item.placeId || item.id || String(Math.random()),
-    title: item.title || item.name || "Sin nombre",
+    title: sanitizeCompanyName(item.title || item.name || "Sin nombre"),
     categoryName: item.categoryName || item.category || searchRaw.query || "",
     address: item.address || item.street || "",
     city: searchRaw.ubicacion || "",
@@ -119,7 +121,7 @@ export async function processSearchDataset(searchId: string, datasetId: string):
     const mockPlaces = generateMockProspects(searchRaw.query, searchRaw.ubicacion, 6);
     prospects = mockPlaces.map((item: any) => ({
       placeId: item.placeId || item.cid || String(Math.random()),
-      title: item.title || item.name || "Sin nombre",
+      title: sanitizeCompanyName(item.title || item.name || "Sin nombre"),
       categoryName: item.categoryName || searchRaw.query || "",
       address: item.address || "",
       city: searchRaw.ubicacion || "",
@@ -157,11 +159,6 @@ export async function processSearchDataset(searchId: string, datasetId: string):
   prospects = prospects.slice(0, originalLimit);
   
   const newProspectsCount = prospects.length;
-
-  const calculateSearchCreditCost = (limit: number): number => {
-    if (limit <= 0) return 0;
-    return Math.ceil(limit / 5);
-  };
 
   const actualCost = calculateSearchCreditCost(newProspectsCount);
 
@@ -239,6 +236,11 @@ export async function startGoogleMapsSearch({
     const actorInput: any = {
       searchStringsArray: [`${query} en ${location}`],
       maxCrawledPlaces: maxPlaces,
+      maxCrawledPlacesPerSearch: maxPlaces,
+      maxAutomaticZoomOut: 0,
+      maxImages: 0,
+      maxReviews: 0,
+      scrapeDetail: false,
       countryCode,
       language: "es",
       exportPlaceUrls: false,

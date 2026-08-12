@@ -5,7 +5,7 @@
  *
  * Página de búsqueda de prospectos con mapa/apify e integración en tiempo real.
  */
-import React, { useState, useEffect, Suspense } from "react";
+import React, { useState, useEffect, Suspense, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
 import { SearchBar } from "@/components/search/search-bar";
 import { RecentSearches } from "@/components/search/recent-searches";
@@ -13,6 +13,7 @@ import { ProspectRealtimeList } from "@/components/prospects/prospect-realtime-l
 import { StaggerContainer, StaggerItem } from "@/components/shared/stagger-container";
 import { Card, CardContent } from "@/components/ui/card";
 import { Search, Sparkles, MapPin, Bot } from "lucide-react";
+import { ProspectsLoadingSkeleton } from "@/components/search/prospects-loading-skeleton";
 
 function BuscarContent() {
   const searchParams = useSearchParams();
@@ -24,6 +25,7 @@ function BuscarContent() {
   } | null>(urlSearchId ? { searchId: urlSearchId, status: "completado" } : null);
 
   const [hasSearches, setHasSearches] = useState<boolean | null>(null);
+  const [isStartingSearch, setIsStartingSearch] = useState(false);
 
   // Allow URL parameter to set active search if navigated to directly
   useEffect(() => {
@@ -31,6 +33,13 @@ function BuscarContent() {
       setActiveSearch({ searchId: urlSearchId, status: "completado" });
     }
   }, [urlSearchId, activeSearch]);
+
+  const handleStatusChange = useCallback((newStatus: string) => {
+    setActiveSearch((prev) => {
+      if (!prev || prev.status === newStatus) return prev;
+      return { ...prev, status: newStatus };
+    });
+  }, []);
 
   return (
     <StaggerContainer className="space-y-6 max-w-5xl mx-auto py-6 px-4">
@@ -51,15 +60,21 @@ function BuscarContent() {
           isSearchingActive={!!activeSearch && activeSearch.status !== 'completado' && activeSearch.status !== 'error'}
           onValidationStart={() => {
             setActiveSearch(null);
+            setIsStartingSearch(true);
+          }}
+          onValidationEnd={() => {
+            setIsStartingSearch(false);
           }}
           onCancelSearch={() => {
             setActiveSearch(null);
+            setIsStartingSearch(false);
           }}
           onSearchStarted={(data) => {
             setActiveSearch({
               searchId: data.searchId,
               status: data.status,
             });
+            setIsStartingSearch(false);
             setHasSearches(true);
           }}
         />
@@ -71,7 +86,10 @@ function BuscarContent() {
           <ProspectRealtimeList
             searchId={activeSearch.searchId}
             initialStatus={activeSearch.status}
+            onStatusChange={handleStatusChange}
           />
+        ) : isStartingSearch ? (
+          <ProspectsLoadingSkeleton />
         ) : (
           <div className="space-y-6">
             <RecentSearches onLoaded={setHasSearches} />

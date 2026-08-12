@@ -2,6 +2,7 @@
 
 import React, { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { updateProfile, reAuditProfile } from "@/app/actions/profile.actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,9 +17,11 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
-import { X, Plus, Sparkles, Building2, Globe, Target, DollarSign, Edit, RefreshCw } from "lucide-react";
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
+import { X, Plus, Sparkles, Building2, Globe, Target, DollarSign, Edit, RefreshCw, Info } from "lucide-react";
 import { toast } from "sonner";
 import type { ProfileRow } from "@/types/database.types";
+import { cleanSocialUrl } from "@/lib/utils";
 
 interface OnboardingFormProps {
   initialProfile?: ProfileRow | null;
@@ -88,6 +91,8 @@ export function OnboardingForm({ initialProfile }: OnboardingFormProps) {
   const [precioPromedio, setPrecioPromedio] = useState<string>(
     initialProfile?.precio_promedio ? String(initialProfile.precio_promedio) : ""
   );
+  // Divisa del ticket — solo estado frontend, no persiste en DB.
+  const [moneda, setMoneda] = useState<"USD" | "MXN" | "COP" | "CLP" | "PEN" | "ARS" | "EUR">("MXN");
 
   const [linkedinUrl, setLinkedinUrl] = useState(initialProfile?.linkedin_url ?? "");
   const [instagramUrl, setInstagramUrl] = useState(initialProfile?.instagram_url ?? "");
@@ -184,6 +189,7 @@ export function OnboardingForm({ initialProfile }: OnboardingFormProps) {
           sitio_web: sitioWeb || undefined,
           portafolio_url: portafolioUrl || undefined,
           precio_promedio: precioPromedio ? Number(precioPromedio) : undefined,
+          moneda,
           linkedin_url: linkedinUrl || undefined,
           instagram_url: instagramUrl || undefined,
           facebook_url: facebookUrl || undefined,
@@ -250,25 +256,37 @@ export function OnboardingForm({ initialProfile }: OnboardingFormProps) {
                 </div>
                 <div>
                   <p className="font-semibold text-slate-500 dark:text-slate-400">Sitio Web</p>
-                  <p>
+                  <p className="min-w-0">
                     {sitioWeb ? (
-                      <a href={sitioWeb} target="_blank" rel="noreferrer" className="text-primary hover:underline">
-                        {sitioWeb}
+                      <a href={cleanSocialUrl(sitioWeb)} target="_blank" rel="noreferrer" className="text-xs text-zinc-400 hover:text-emerald-400 max-w-[180px] sm:max-w-[220px] md:max-w-[260px] truncate block transition-colors" title={cleanSocialUrl(sitioWeb)}>
+                        {cleanSocialUrl(sitioWeb)}
                       </a>
                     ) : (
-                      "No especificado"
+                      <button
+                        onClick={() => setIsEditing(true)}
+                        className="inline-flex items-center gap-1.5 text-xs text-emerald-500 hover:text-emerald-400 font-medium transition-colors mt-0.5"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        Añadir sitio web
+                      </button>
                     )}
                   </p>
                 </div>
                 <div>
                   <p className="font-semibold text-slate-500 dark:text-slate-400">Portafolio</p>
-                  <p>
+                  <p className="min-w-0">
                     {portafolioUrl ? (
-                      <a href={portafolioUrl} target="_blank" rel="noreferrer" className="text-primary hover:underline">
-                        {portafolioUrl}
+                      <a href={cleanSocialUrl(portafolioUrl)} target="_blank" rel="noreferrer" className="text-xs text-zinc-400 hover:text-emerald-400 max-w-[180px] sm:max-w-[220px] md:max-w-[260px] truncate block transition-colors" title={cleanSocialUrl(portafolioUrl)}>
+                        {cleanSocialUrl(portafolioUrl)}
                       </a>
                     ) : (
-                      "No especificado"
+                      <button
+                        onClick={() => setIsEditing(true)}
+                        className="inline-flex items-center gap-1.5 text-xs text-emerald-500 hover:text-emerald-400 font-medium transition-colors mt-0.5"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        Añadir portafolio
+                      </button>
                     )}
                   </p>
                 </div>
@@ -305,40 +323,58 @@ export function OnboardingForm({ initialProfile }: OnboardingFormProps) {
               <div className="space-y-3 text-sm">
                 <div className="flex items-center gap-3">
                   <Linkedin className="h-5 w-5 min-w-[20px] text-[#0077B5] flex-shrink-0" />
-                  <div className="overflow-hidden">
+                  <div className="overflow-hidden min-w-0 flex-1">
                     <p className="font-semibold text-slate-500 dark:text-slate-400 text-xs">LinkedIn</p>
                     {linkedinUrl ? (
-                      <a href={linkedinUrl} target="_blank" rel="noreferrer" className="text-primary hover:underline truncate block">
-                        {linkedinUrl}
+                      <a href={cleanSocialUrl(linkedinUrl)} target="_blank" rel="noreferrer" className="text-xs text-zinc-400 hover:text-emerald-400 max-w-[180px] sm:max-w-[220px] md:max-w-[260px] truncate block transition-colors" title={cleanSocialUrl(linkedinUrl)}>
+                        {cleanSocialUrl(linkedinUrl)}
                       </a>
                     ) : (
-                      <p className="text-muted-foreground italic">No conectada</p>
+                      <button
+                        onClick={() => setIsEditing(true)}
+                        className="inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-emerald-400 transition-colors mt-0.5"
+                      >
+                        <Plus className="w-3 h-3" />
+                        Conectar
+                      </button>
                     )}
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
                   <Instagram className="h-5 w-5 min-w-[20px] text-[#E1306C] flex-shrink-0" />
-                  <div className="overflow-hidden">
+                  <div className="overflow-hidden min-w-0 flex-1">
                     <p className="font-semibold text-slate-500 dark:text-slate-400 text-xs">Instagram</p>
                     {instagramUrl ? (
-                      <a href={instagramUrl} target="_blank" rel="noreferrer" className="text-primary hover:underline truncate block">
-                        {instagramUrl}
+                      <a href={cleanSocialUrl(instagramUrl)} target="_blank" rel="noreferrer" className="text-xs text-zinc-400 hover:text-emerald-400 max-w-[180px] sm:max-w-[220px] md:max-w-[260px] truncate block transition-colors" title={cleanSocialUrl(instagramUrl)}>
+                        {cleanSocialUrl(instagramUrl)}
                       </a>
                     ) : (
-                      <p className="text-muted-foreground italic">No conectada</p>
+                      <button
+                        onClick={() => setIsEditing(true)}
+                        className="inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-emerald-400 transition-colors mt-0.5"
+                      >
+                        <Plus className="w-3 h-3" />
+                        Conectar
+                      </button>
                     )}
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
                   <Facebook className="h-5 w-5 min-w-[20px] text-[#1877F2] flex-shrink-0" />
-                  <div className="overflow-hidden">
+                  <div className="overflow-hidden min-w-0 flex-1">
                     <p className="font-semibold text-slate-500 dark:text-slate-400 text-xs">Facebook</p>
                     {facebookUrl ? (
-                      <a href={facebookUrl} target="_blank" rel="noreferrer" className="text-primary hover:underline truncate block">
-                        {facebookUrl}
+                      <a href={cleanSocialUrl(facebookUrl)} target="_blank" rel="noreferrer" className="text-xs text-zinc-400 hover:text-emerald-400 max-w-[180px] sm:max-w-[220px] md:max-w-[260px] truncate block transition-colors" title={cleanSocialUrl(facebookUrl)}>
+                        {cleanSocialUrl(facebookUrl)}
                       </a>
                     ) : (
-                      <p className="text-muted-foreground italic">No conectada</p>
+                      <button
+                        onClick={() => setIsEditing(true)}
+                        className="inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-emerald-400 transition-colors mt-0.5"
+                      >
+                        <Plus className="w-3 h-3" />
+                        Conectar
+                      </button>
                     )}
                   </div>
                 </div>
@@ -461,19 +497,44 @@ export function OnboardingForm({ initialProfile }: OnboardingFormProps) {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="precio">Ticket / Precio promedio (MXN)</Label>
-              <div className="relative">
-                <DollarSign className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Label htmlFor="precio">Ticket / Precio promedio</Label>
+              <div className="flex gap-2 items-center">
+                {/* Selector de divisa */}
+                <Select
+                  value={moneda}
+                  onValueChange={(val) => setMoneda(val as typeof moneda)}
+                  disabled={isPending}
+                >
+                  <SelectTrigger id="precio-moneda" className="w-28 shrink-0">
+                    <SelectValue placeholder="Divisa" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="MXN">MXN ($)</SelectItem>
+                    <SelectItem value="USD">USD ($)</SelectItem>
+                    <SelectItem value="COP">COP ($)</SelectItem>
+                    <SelectItem value="CLP">CLP ($)</SelectItem>
+                    <SelectItem value="PEN">PEN (S/)</SelectItem>
+                    <SelectItem value="ARS">ARS ($)</SelectItem>
+                    <SelectItem value="EUR">EUR (€)</SelectItem>
+                  </SelectContent>
+                </Select>
+                {/* Input de monto */}
                 <Input
                   id="precio"
                   type="number"
                   placeholder="ej. 15000"
                   value={precioPromedio}
                   onChange={(e) => setPrecioPromedio(e.target.value)}
-                  className="pl-9"
+                  className="flex-1"
                   disabled={isPending}
                 />
               </div>
+              {/* Helper B2B: aviso si el monto parece muy bajo para servicios profesionales */}
+              {Number(precioPromedio) > 0 && Number(precioPromedio) < 300 && (
+                <p className="mt-1.5 text-[11px] text-amber-400/90 flex items-start gap-1">
+                  <span>💡 Recomendación: Para diagnósticos de IA más precisos, te sugerimos ingresar el costo promedio por proyecto completo o fee mensual recurrente.</span>
+                </p>
+              )}
             </div>
 
             <div className="space-y-2">
@@ -507,7 +568,28 @@ export function OnboardingForm({ initialProfile }: OnboardingFormProps) {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="portafolioUrl">Portafolio / Casos de éxito (URL)</Label>
+              <div className="flex items-center gap-1.5">
+                <Label htmlFor="portafolioUrl">Portafolio / Casos de éxito (URL)</Label>
+                <TooltipProvider delay={400} closeDelay={200}>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          aria-label="¿Para qué sirve este campo?"
+                          className="inline-flex items-center cursor-help text-muted-foreground"
+                        />
+                      }
+                    >
+                      <Info className="w-3.5 h-3.5" />
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      La IA analizará el contenido real de esta URL para enriquecer tu Diagnóstico Estratégico con evidencia concreta de tus casos de éxito y capacidades.
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
               <Input
                 id="portafolioUrl"
                 type="url"
@@ -592,16 +674,24 @@ export function OnboardingForm({ initialProfile }: OnboardingFormProps) {
             <div className="space-y-2">
               <div className="flex justify-between">
                 <Label htmlFor="descripcion">Descripción de tus servicios *</Label>
-                <span className={`text-xs ${descripcion.length > 300 ? "text-destructive font-medium" : "text-muted-foreground"}`}>
-                  {descripcion.length}/300
+                <span
+                  className={`text-xs ${
+                    descripcion.length > 1000
+                      ? "text-destructive font-medium"
+                      : descripcion.length > 900
+                      ? "text-amber-500 font-medium"
+                      : "text-muted-foreground"
+                  }`}
+                >
+                  {descripcion.length}/1000
                 </span>
               </div>
               <Textarea
                 id="descripcion"
                 placeholder="Describe a qué se dedica tu empresa y el valor que entregas a tus clientes..."
-                rows={4}
+                rows={7}
                 value={descripcion}
-                onChange={(e) => setDescripcion(e.target.value.slice(0, 300))}
+                onChange={(e) => setDescripcion(e.target.value.slice(0, 1000))}
                 disabled={isPending}
               />
             </div>

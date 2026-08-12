@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
 import { ZonlixLogo } from "@/components/shared/zonlix-logo";
-import { LogOut, User as UserIcon, Search, Building2, BarChart3, Kanban, Settings, Coins } from "lucide-react";
+import { LogOut, User as UserIcon, Search, Building2, BarChart3, Kanban, Settings, Coins, Loader2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import type { User } from "@supabase/supabase-js";
 
@@ -22,64 +22,91 @@ const navItems = [
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
-  const supabase = createClient();
   const [user, setUser] = useState<User | null>(null);
-  const [credits, setCredits] = useState<number>(0);
+  const [credits, setCredits] = useState<number | null>(null);
+  const [fullName, setFullName] = useState<string | null>(null);
 
   useEffect(() => {
-    let channel: any;
-    const fetchUserAndCredits = async () => {
-      const { data } = await supabase.auth.getUser();
-      if (data?.user) {
-        setUser(data.user);
-        
-        // Fetch initial credits
-        const { data: profile } = await (supabase.from("profiles") as any)
+    let isMounted = true;
+    const supabase = createClient();
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+
+    const setupRealtime = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user?.id) {
+          if (isMounted) setCredits(0);
+          return;
+        }
+
+        if (isMounted) {
+          setUser(user);
+          const userMetaName = user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || 'Usuario';
+          setFullName(userMetaName);
+        }
+
+        // Fetch inicial de créditos
+        const { data: profile, error } = await supabase
+          .from("profiles")
           .select("credits_remaining")
-          .eq("id", data.user.id)
-          .single();
-          
-        if (profile) {
+          .eq("id", user.id)
+          .maybeSingle();
+
+        if (error) {
+          console.error('[Sidebar] Error de Supabase:', error.message);
+        } else if (isMounted && profile) {
           setCredits((profile as any).credits_remaining ?? 0);
         }
 
-        // Subscribe to Realtime changes
-        channel = supabase
-          .channel("credits-update-channel")
-          .on(
-            "postgres_changes",
-            { event: "UPDATE", schema: "public", table: "profiles", filter: `id=eq.${data.user.id}` },
-            (payload) => {
-              if ((payload.new as any).credits_remaining !== undefined) {
-                setCredits((payload.new as any).credits_remaining);
-              }
+      // Canal único por usuario — evita colisiones entre montajes
+      channel = supabase
+        .channel(`credits-update-${user.id}`)
+        .on(
+          "postgres_changes",
+          { event: "UPDATE", schema: "public", table: "profiles", filter: `id=eq.${user.id}` },
+          (payload) => {
+            if (isMounted && payload.new && "credits_remaining" in payload.new) {
+              setCredits(payload.new.credits_remaining as number);
             }
-          )
-          .subscribe();
+          }
+        )
+        .subscribe();
+      } catch (err) {
+        console.error('[Sidebar] Error inesperado:', err);
       }
     };
-    fetchUserAndCredits();
+
+    setupRealtime();
 
     return () => {
+      isMounted = false;
       if (channel) supabase.removeChannel(channel);
     };
-  }, [supabase]);
+  }, []);
 
   const handleSignOut = async () => {
+    const supabase = createClient();
     await supabase.auth.signOut();
     router.push("/login");
   };
 
-  const userEmail = user?.email || "usuario@ejemplo.com";
-  const userInitial = userEmail.charAt(0).toUpperCase();
+  const userEmail = user?.email || "";
+  const userInitial = user?.user_metadata?.full_name?.charAt(0)?.toUpperCase() 
+    || user?.email?.charAt(0)?.toUpperCase() 
+    || 'T';
 
   return (
     <aside className="w-64 min-h-screen bg-white dark:bg-[#0B0F17] text-slate-900 dark:text-slate-100 border-r border-slate-200 dark:border-slate-800 p-4 flex flex-col justify-between font-sans select-none">
       <div>
         {/* Logo */}
-        <div className="mb-8 px-2 flex items-center">
-          <ZonlixLogo size="md" className="text-slate-900 dark:text-white" />
-          <span className="text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded-md font-semibold tracking-wider ml-1.5 uppercase">beta</span>
+        <div className="mb-8 px-2 flex items-center justify-between">
+          <div className="flex items-center">
+            <ZonlixLogo size="md" className="text-slate-900 dark:text-white" />
+            <span className="text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded-md font-semibold tracking-wider ml-1.5 uppercase">beta</span>
+          </div>
+          <div className="w-8 h-8 rounded-full bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-semibold text-xs shrink-0">
+            {userInitial}
+          </div>
         </div>
 
         {/* Navigation */}
@@ -124,8 +151,8 @@ export function Sidebar() {
               <Coins className="w-4 h-4" />
               Créditos
             </div>
-            <span className="text-xs font-bold bg-white dark:bg-[#0B0F17] text-emerald-700 dark:text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-100 dark:border-emerald-500/20 shadow-sm">
-              {credits}
+            <span className="text-xs font-bold bg-white dark:bg-[#0B0F17] text-emerald-700 dark:text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-100 dark:border-emerald-500/20 shadow-sm flex items-center justify-center min-w-[32px] min-h-[24px]">
+              {credits === null ? <Loader2 className="w-3 h-3 animate-spin text-emerald-500" /> : credits}
             </span>
           </div>
           <p className="text-[10px] text-emerald-600/80 dark:text-emerald-400/70 leading-tight">
@@ -137,7 +164,7 @@ export function Sidebar() {
         <div className="pt-4 border-t border-border flex items-center justify-between">
         <div className="group/footer flex flex-1 items-center justify-between p-2 rounded-xl hover:bg-muted transition-colors">
           <div className="flex items-center gap-2 truncate">
-            <div className="h-8 w-8 rounded-full bg-primary text-primary-foreground font-semibold text-xs flex items-center justify-center shrink-0">
+            <div className="w-8 h-8 rounded-full bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-semibold text-xs shrink-0">
               {userInitial}
             </div>
             <div className="flex flex-col truncate">

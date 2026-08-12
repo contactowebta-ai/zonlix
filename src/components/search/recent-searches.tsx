@@ -10,8 +10,10 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { History, MapPin, Search, Calendar, Users, ExternalLink, ChevronRight } from "lucide-react";
+import { History, MapPin, Search, Calendar, Users, ExternalLink, ChevronRight, Trash2, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
+import { deleteSearchHistoryItem } from "@/app/actions/search.actions";
 
 interface SearchHistoryItem {
   id: string;
@@ -77,6 +79,10 @@ export function RecentSearches({ onLoaded }: RecentSearchesProps) {
     loadRecentSearches();
   }, [onLoaded, pageLimit]);
 
+  const handleDeleteSearch = (id: string) => {
+    setSearches(prev => prev.filter(s => s.id !== id));
+  };
+
 
   if (loading && searches.length === 0) {
     return null; 
@@ -87,10 +93,10 @@ export function RecentSearches({ onLoaded }: RecentSearchesProps) {
   }
 
   return (
-    <Card className="border-border bg-card shadow-sm">
+    <Card className="bg-white dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 shadow-sm text-zinc-900 dark:text-zinc-100">
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
-          <CardTitle className="text-base font-semibold flex items-center gap-2 text-foreground">
+          <CardTitle className="text-base font-semibold flex items-center gap-2 text-zinc-900 dark:text-zinc-100">
             <History className="w-4 h-4 text-primary" />
             Búsquedas Recientes
           </CardTitle>
@@ -105,56 +111,9 @@ export function RecentSearches({ onLoaded }: RecentSearchesProps) {
       </CardHeader>
       <CardContent>
         <div className="space-y-3">
-          {searches.map((item) => {
-            const dateStr = new Date(item.created_at).toLocaleDateString("es-MX", {
-              day: "numeric",
-              month: "short",
-              hour: "2-digit",
-              minute: "2-digit",
-            });
-
-            const count = item.total_resultados || 0;
-
-            return (
-              <div
-                key={item.id}
-                className="flex items-center justify-between p-3 rounded-lg border border-border/60 bg-muted/30 hover:bg-muted/50 transition-colors"
-              >
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2 font-medium text-sm text-foreground">
-                    <Search className="w-3.5 h-3.5 text-primary" />
-                    <span>{item.query}</span>
-                    <span className="text-muted-foreground font-normal">en</span>
-                    <span className="inline-flex items-center gap-1 text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-md">
-                      <MapPin className="w-3 h-3" />
-                      {item.ubicacion}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                    <span className="flex items-center gap-1">
-                      <Calendar className="w-3 h-3" />
-                      {dateStr}
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <Users className="w-3 h-3 text-emerald-500" />
-                      {count} prospectos
-                    </span>
-                  </div>
-                </div>
-
-                <Link
-                  href={`/buscar?searchId=${item.id}`}
-                  className={cn(
-                    buttonVariants({ variant: "outline", size: "sm" }),
-                    "text-xs gap-1 h-8"
-                  )}
-                >
-                  Ver prospectos
-                  <ExternalLink className="w-3 h-3" />
-                </Link>
-              </div>
-            );
-          })}
+          {searches.map((item) => (
+            <RecentSearchItem key={item.id} item={item} onDelete={handleDeleteSearch} />
+          ))}
           
           {searches.length >= pageLimit && (
             <Button
@@ -169,5 +128,85 @@ export function RecentSearches({ onLoaded }: RecentSearchesProps) {
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function RecentSearchItem({ item, onDelete }: { item: SearchHistoryItem, onDelete: (id: string) => void }) {
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const dateStr = new Date(item.created_at).toLocaleDateString("es-MX", {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  const count = item.total_resultados || 0;
+
+  const handleDelete = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (!confirm('¿Estás seguro de que deseas eliminar esta búsqueda del historial?')) return;
+
+    setIsDeleting(true);
+    const res = await deleteSearchHistoryItem(item.id);
+    setIsDeleting(false);
+
+    if (res.success) {
+      toast.success('Búsqueda eliminada del historial.');
+      onDelete(item.id);
+    } else {
+      toast.error(res.error || 'No se pudo eliminar la búsqueda.');
+    }
+  };
+
+  return (
+    <div className="group relative flex items-center justify-between p-3 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/80 hover:bg-zinc-100 dark:hover:bg-zinc-800/60 transition-colors">
+      <button
+        onClick={handleDelete}
+        disabled={isDeleting}
+        title="Eliminar de historial"
+        className="absolute top-2 right-2 p-1.5 rounded-lg bg-white/80 dark:bg-zinc-800/80 hover:bg-rose-50 dark:hover:bg-rose-500/20 text-zinc-400 hover:text-rose-500 border border-border/50 hover:border-rose-200 dark:hover:border-rose-500/30 opacity-0 group-hover:opacity-100 transition-all duration-200 z-10"
+      >
+        {isDeleting ? (
+          <Loader2 className="w-3.5 h-3.5 animate-spin text-rose-500"/>
+        ) : (
+          <Trash2 className="w-3.5 h-3.5"/>
+        )}
+      </button>
+
+      <div className="space-y-1">
+        <div className="flex items-center gap-2 font-medium text-sm text-zinc-900 dark:text-zinc-100 pr-8">
+          <Search className="w-3.5 h-3.5 text-primary" />
+          <span>{item.query}</span>
+          <span className="text-zinc-500 dark:text-zinc-400 font-normal">en</span>
+          <span className="inline-flex items-center gap-1 text-xs text-zinc-600 dark:text-zinc-400 bg-zinc-200/50 dark:bg-zinc-800/50 px-2 py-0.5 rounded-md">
+            <MapPin className="w-3 h-3" />
+            {item.ubicacion}
+          </span>
+        </div>
+        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+          <span className="flex items-center gap-1">
+            <Calendar className="w-3 h-3" />
+            {dateStr}
+          </span>
+          <span className="flex items-center gap-1">
+            <Users className="w-3 h-3 text-emerald-500" />
+            {count} prospectos
+          </span>
+        </div>
+      </div>
+
+      <Link
+        href={`/buscar?searchId=${item.id}`}
+        className={cn(
+          buttonVariants({ variant: "outline", size: "sm" }),
+          "text-xs gap-1 h-8 bg-white dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-700"
+        )}
+      >
+        Ver prospectos
+        <ExternalLink className="w-3 h-3" />
+      </Link>
+    </div>
   );
 }

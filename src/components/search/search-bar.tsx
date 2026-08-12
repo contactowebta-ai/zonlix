@@ -14,11 +14,12 @@ import { createClient } from "@/lib/supabase/client";
 interface SearchBarProps {
   onSearchStarted: (data: { searchId: string; status: string; source: string }) => void;
   onValidationStart?: () => void;
+  onValidationEnd?: () => void;
   onCancelSearch?: () => void;
   isSearchingActive?: boolean;
 }
 
-export function SearchBar({ onSearchStarted, onValidationStart, onCancelSearch, isSearchingActive = false }: SearchBarProps) {
+export function SearchBar({ onSearchStarted, onValidationStart, onValidationEnd, onCancelSearch, isSearchingActive = false }: SearchBarProps) {
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [ubicacion, setUbicacion] = useState("");
@@ -45,6 +46,12 @@ export function SearchBar({ onSearchStarted, onValidationStart, onCancelSearch, 
     };
     fetchCredits();
   }, []);
+
+  React.useEffect(() => {
+    if (!isSearchingActive) {
+      setLocalIsSearching(false);
+    }
+  }, [isSearchingActive]);
 
   const isSearching = isSearchingActive || localIsSearching;
 
@@ -181,6 +188,7 @@ export function SearchBar({ onSearchStarted, onValidationStart, onCancelSearch, 
         setIsValidating(false);
         setLocalIsSearching(false);
       }
+      if (onValidationEnd) onValidationEnd();
     }
   };
 
@@ -199,80 +207,67 @@ export function SearchBar({ onSearchStarted, onValidationStart, onCancelSearch, 
             : {}
         }
         transition={{ repeat: Infinity, duration: 2, ease: "easeInOut" }}
-        className={`flex items-center w-full bg-zinc-900/90 border ${
+        className={`flex items-center gap-2 w-full bg-white dark:bg-zinc-900 border ${
           querySuspicious || locationSuspicious
             ? "border-red-500 shadow-red-500/20"
-            : "border-zinc-800"
-        } rounded-2xl p-1.5 gap-2 shadow-xl focus-within:border-emerald-500/40 transition-all max-w-4xl mx-auto`}
+            : "border-zinc-200 dark:border-zinc-800/80"
+        } rounded-full overflow-hidden p-2 shadow-md dark:shadow-none focus-within:border-emerald-500/40 transition-all max-w-4xl mx-auto`}
       >
-        <div className="flex-1 min-w-0 flex items-center px-3 gap-2 border-r border-zinc-800/80">
+        <div className="flex-1 min-w-0 flex items-center px-3 gap-2 border-r border-zinc-200 dark:border-zinc-800/80">
           <motion.div
-            className="absolute left-3.5 top-3.5"
+            className="shrink-0 flex items-center justify-center relative"
             animate={isSearching ? { opacity: [1, 0.6, 1] } : {}}
             transition={{ repeat: Infinity, duration: 1.8 }}
           >
-            <Search className="h-5 w-5 shrink-0 text-slate-400 dark:text-slate-500" />
+            <Search className="h-4 w-4 text-zinc-400 shrink-0" />
           </motion.div>
-          <Input
-            placeholder="Que buscas? (ej. Clinicas dentales)"
+          <input 
+            type="text" 
+            placeholder="¿Qué buscas? (ej. Clínicas dentales)"
             value={query}
             onChange={(e) => {
               setQuery(e.target.value);
               if (validationError) setValidationError(null);
             }}
             disabled={isSearching || isValidating}
-            className="w-full bg-transparent text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none h-10"
+            className="w-full min-w-0 bg-transparent text-sm text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 focus:outline-none h-10 disabled:opacity-50 disabled:cursor-not-allowed"
           />
         </div>
 
-        <div className="flex-1 min-w-0 flex items-center px-3 gap-2 border-r border-zinc-800/80">
-          <MapPin className="h-4 w-4 shrink-0 text-zinc-400" />
-          <Input
-            placeholder="Ubicacion (ej. Queretaro)"
+        <div className="flex-1 min-w-0 flex items-center px-3 gap-2 border-r border-zinc-200 dark:border-zinc-800/80">
+          <MapPin className="w-4 h-4 text-zinc-400 shrink-0"/>
+          <input 
+            type="text" 
+            placeholder="Ubicación (ej. Querétaro)"
             value={ubicacion}
             onChange={(e) => {
               setUbicacion(e.target.value);
               if (validationError) setValidationError(null);
             }}
             disabled={isSearching || isValidating}
-            className="w-full bg-transparent text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none h-10"
+            className="w-full min-w-0 bg-transparent text-sm text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 focus:outline-none h-10 disabled:opacity-50 disabled:cursor-not-allowed"
           />
         </div>
 
-        <div className="shrink-0 w-20 flex items-center px-2">
+        <div className="shrink-0 flex items-center px-2 bg-transparent">
           <Select
             value={limit.toString()}
             onValueChange={(val) => setLimit(Number(val))}
             disabled={isSearching || isValidating}
           >
-            <SelectTrigger className="w-full h-10 bg-transparent border-0 shadow-none text-zinc-100 font-medium focus:ring-0 hover:bg-zinc-800/50 rounded-lg transition-colors px-2">
+            <SelectTrigger className="w-full h-10 bg-transparent border-0 shadow-none text-zinc-900 dark:text-zinc-100 font-medium focus:ring-0 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 rounded-lg transition-colors px-2 disabled:opacity-50 disabled:cursor-not-allowed">
               <SelectValue placeholder="Cantidad" />
             </SelectTrigger>
             <SelectContent className="bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 shadow-xl rounded-xl p-1 text-zinc-900 dark:text-zinc-100">
-              <SelectItem
-                value="10"
-                className="hover:bg-zinc-100 dark:hover:bg-zinc-800/80 rounded-lg cursor-pointer"
-              >
-                10 prospectos
-              </SelectItem>
-              <SelectItem
-                value="20"
-                className="hover:bg-zinc-100 dark:hover:bg-zinc-800/80 rounded-lg cursor-pointer"
-              >
-                20 prospectos
-              </SelectItem>
-              <SelectItem
-                value="50"
-                className="hover:bg-zinc-100 dark:hover:bg-zinc-800/80 rounded-lg cursor-pointer"
-              >
-                50 prospectos
-              </SelectItem>
+              <SelectItem value="10" className="hover:bg-zinc-100 dark:hover:bg-zinc-800/80 rounded-lg cursor-pointer">10 prospectos</SelectItem>
+              <SelectItem value="20" className="hover:bg-zinc-100 dark:hover:bg-zinc-800/80 rounded-lg cursor-pointer">20 prospectos</SelectItem>
+              <SelectItem value="50" className="hover:bg-zinc-100 dark:hover:bg-zinc-800/80 rounded-lg cursor-pointer">50 prospectos</SelectItem>
             </SelectContent>
           </Select>
         </div>
 
         <div className="shrink-0">
-          {isSearching || isValidating ? (
+          {isSearching ? (
             <button
               type="button"
               onClick={(e) => {
@@ -282,26 +277,32 @@ export function SearchBar({ onSearchStarted, onValidationStart, onCancelSearch, 
               }}
               className="flex items-center justify-center gap-2 px-5 py-2.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 text-sm font-medium rounded-xl transition-all"
             >
-              {isValidating ? <ZonlixLoader size={18} inline /> : <X className="w-4 h-4"/>}
-              <span>{isValidating ? "Validando..." : "Cancelar Búsqueda"}</span>
+              <X className="w-4 h-4"/>
+              <span className="hidden sm:inline">Cancelar Búsqueda</span>
+              <span className="inline sm:hidden">Cancelar</span>
             </button>
           ) : (
             <button
-              type="submit"
-              disabled={isFormInvalid || isValidating}
-              title={isInsufficientCredits ? "Saldo insuficiente" : "Buscar Prospectos"}
-              className="flex items-center justify-center gap-2 px-5 py-2.5 bg-emerald-500 hover:bg-emerald-600 active:scale-[0.98] text-white text-sm font-medium rounded-xl transition-all disabled:opacity-50 shadow-md shadow-emerald-500/10"
-            >
-              <Search className="w-4 h-4"/>
-              <span>{isValidating ? "Validando..." : "Buscar Prospectos"}</span>
-              {!isValidating && userCredits !== null && (
-                <span className={`ml-1 px-2 py-0.5 text-xs rounded-full border font-mono ${isInsufficientCredits ? "bg-red-950 text-red-200 border-red-400/30" : "bg-black/20 text-emerald-100 border-white/10"}`}>
-                  {requiredCredits} cr
-                </span>
-              )}
-            </button>
-          )}
-        </div>
+            type="submit"
+            disabled={isFormInvalid || isValidating}
+            title={isInsufficientCredits ? "Saldo insuficiente" : "Buscar Prospectos"}
+            className="relative z-10 shrink-0 flex items-center justify-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs sm:text-sm font-medium rounded-full transition-all shadow-md shadow-emerald-500/10 disabled:opacity-60 disabled:cursor-not-allowed disabled:pointer-events-none"
+          >
+            {isValidating ? (
+              <ZonlixLoader variant="button" size={16} inline />
+            ) : (
+              <Search className="w-4 h-4 shrink-0"/>
+            )}
+            <span className="hidden md:inline">{isValidating ? "Iniciando..." : "Buscar Prospectos"}</span>
+            <span className="inline md:hidden">{isValidating ? "..." : "Buscar"}</span>
+            {userCredits !== null && !isValidating && (
+              <span className={`ml-0.5 sm:ml-1 px-1.5 sm:px-2 py-0.5 bg-black/20 text-emerald-100 text-[10px] sm:text-xs rounded-full border font-mono shrink-0 ${isInsufficientCredits ? "bg-red-950 text-red-200 border-red-400/30" : "border-white/10"}`}>
+                {requiredCredits} cr
+              </span>
+            )}
+          </button>
+        )}
+      </div>
       </motion.div>
 
       <AnimatePresence>

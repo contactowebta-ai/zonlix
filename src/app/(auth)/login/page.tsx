@@ -13,8 +13,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Sparkles, Mail, Lock, LogIn, UserPlus, Loader2 } from "lucide-react";
+import { Mail, Lock, LogIn, UserPlus, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
+import { ZonlixLogo } from "@/components/shared/zonlix-logo";
+import { ZonlixLoader } from "@/components/shared/zonlix-loader";
+import { getAuthErrorMessage } from "@/lib/auth-errors";
 
 function LoginContent() {
   const router = useRouter();
@@ -25,47 +28,76 @@ function LoginContent() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isPending, startTransition] = useTransition();
+  // Error inline para feedback visual dentro del card (complementa el toast)
+  const [authError, setAuthError] = useState<string | null>(null);
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
+    setAuthError(null);
 
     if (!email.trim() || !password) {
-      toast.error("Por favor completa todos los campos");
+      const msg = "Por favor completa todos los campos";
+      setAuthError(msg);
+      toast.error(msg);
       return;
     }
 
     startTransition(async () => {
       try {
         const supabase = createClient();
-        const { error } = await supabase.auth.signInWithPassword({
+        const { data, error } = await supabase.auth.signInWithPassword({
           email: email.trim(),
           password,
         });
 
         if (error) {
-          toast.error(error.message || "Error al iniciar sesión. Verifica tus credenciales.");
+          const msg = getAuthErrorMessage(error);
+          setAuthError(msg);
+          toast.error(msg);
           return;
         }
 
+        // Login exitoso — limpiar error y redirigir
+        setAuthError(null);
         toast.success("¡Sesión iniciada con éxito!");
-        router.push("/onboarding");
+
+        // Redirección condicional según estado de onboarding
+        let destination = "/onboarding"; // fallback seguro
+        if (data?.user?.id) {
+          const { data: profileData } = await (supabase.from("profiles") as any)
+            .select("onboarding_completado")
+            .eq("id", data.user.id)
+            .maybeSingle();
+          if (profileData?.onboarding_completado === true) {
+            destination = "/buscar";
+          }
+        }
+
+        router.push(destination);
         router.refresh();
       } catch (err) {
-        toast.error("Error inesperado al iniciar sesión");
+        const msg = getAuthErrorMessage(err);
+        setAuthError(msg);
+        toast.error(msg);
       }
     });
   };
 
   const handleSignUp = (e: React.FormEvent) => {
     e.preventDefault();
+    setAuthError(null);
 
     if (!email.trim() || !password) {
-      toast.error("Por favor completa todos los campos");
+      const msg = "Por favor completa todos los campos";
+      setAuthError(msg);
+      toast.error(msg);
       return;
     }
 
     if (password.length < 6) {
-      toast.error("La contraseña debe tener al menos 6 caracteres");
+      const msg = "La contraseña debe tener al menos 6 caracteres";
+      setAuthError(msg);
+      toast.error(msg);
       return;
     }
 
@@ -78,15 +110,20 @@ function LoginContent() {
         });
 
         if (error) {
-          toast.error(error.message || "Error al registrar la cuenta.");
+          const msg = getAuthErrorMessage(error);
+          setAuthError(msg);
+          toast.error(msg);
           return;
         }
 
+        setAuthError(null);
         toast.success("¡Cuenta creada exitosamente! Redirigiendo...");
         router.push("/onboarding");
         router.refresh();
       } catch (err) {
-        toast.error("Error inesperado al crear la cuenta");
+        const msg = getAuthErrorMessage(err);
+        setAuthError(msg);
+        toast.error(msg);
       }
     });
   };
@@ -95,21 +132,22 @@ function LoginContent() {
     <main className="flex min-h-screen items-center justify-center bg-background px-4 py-12">
       <div className="w-full max-w-md space-y-6">
 
-        {/* Branding Header */}
-        <div className="text-center space-y-2">
-          <div className="inline-flex items-center justify-center p-3 bg-primary/10 rounded-2xl text-primary mb-2">
-            <Sparkles className="w-8 h-8" />
-          </div>
-          <h1 className="text-3xl font-bold tracking-tight text-foreground">
-            Zonlix
-          </h1>
+        {/* Branding Header — ZonlixLogo reemplaza Sparkles + h1 duplicado */}
+        <div className="text-center space-y-2 flex flex-col items-center">
+          {/* variant="dark" → text-slate-900 dark:text-white, igual que el h1 original con text-foreground */}
+          <ZonlixLogo
+            size="lg"
+            variant="dark"
+            showText={true}
+            glow={true}
+          />
           <p className="text-sm text-muted-foreground">
             Plataforma B2B de prospección y auditoría con IA
           </p>
         </div>
 
-        {/* Auth Card */}
-        <Card className="border-border bg-card shadow-lg">
+        {/* Auth Card — vidrio-oscuro en dark mode, legible en light */}
+        <Card className="bg-white dark:bg-zinc-900/95 backdrop-blur-xl border border-zinc-200 dark:border-zinc-800 shadow-2xl rounded-2xl">
           <CardHeader className="text-center pb-4">
             <CardTitle className="text-xl font-semibold">Bienvenido</CardTitle>
             <CardDescription className="text-xs">
@@ -119,7 +157,7 @@ function LoginContent() {
           <CardContent>
             <Tabs
               value={activeTab}
-              onValueChange={(val) => setActiveTab(val ?? "login")}
+              onValueChange={(val) => { setActiveTab(val ?? "login"); setAuthError(null); }}
               className="w-full"
             >
               <TabsList className="grid grid-cols-2 w-full mb-6">
@@ -135,10 +173,18 @@ function LoginContent() {
 
               {/* INICIAR SESIÓN */}
               <TabsContent value="login">
-                <form onSubmit={handleLogin} className="space-y-4">
+                <form onSubmit={handleLogin} noValidate className="space-y-4">
+                  {/* Banner de error inline — visible cuando hay error de auth/validación */}
+                  {authError && (
+                    <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-red-400 text-xs font-medium flex items-center gap-2 animate-in fade-in-0 duration-200">
+                      <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
+                      <span>{authError}</span>
+                    </div>
+                  )}
                   <div className="space-y-2">
                     <Label htmlFor="login-email">Correo Electrónico</Label>
-                    <div className="relative">
+                    {/* group permite group-focus-within en el ícono si se desea en el futuro */}
+                    <div className="relative group">
                       <Mail className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
                       <Input
                         id="login-email"
@@ -147,14 +193,14 @@ function LoginContent() {
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
                         disabled={isPending}
-                        className="pl-9 text-xs"
+                        className="pl-9 text-xs focus:border-emerald-500 focus:ring-emerald-500"
                       />
                     </div>
                   </div>
 
                   <div className="space-y-2">
                     <Label htmlFor="login-password">Contraseña</Label>
-                    <div className="relative">
+                    <div className="relative group">
                       <Lock className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
                       <Input
                         id="login-password"
@@ -163,7 +209,7 @@ function LoginContent() {
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
                         disabled={isPending}
-                        className="pl-9 text-xs"
+                        className="pl-9 text-xs focus:border-emerald-500 focus:ring-emerald-500"
                       />
                     </div>
                   </div>
@@ -174,10 +220,7 @@ function LoginContent() {
                     className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-semibold h-10 mt-2"
                   >
                     {isPending ? (
-                      <>
-                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                        Iniciando sesión...
-                      </>
+                      <ZonlixLoader variant="button" inline size={16} text="Iniciando sesión..." />
                     ) : (
                       <>
                         <LogIn className="w-4 h-4 mr-2" />
@@ -190,10 +233,17 @@ function LoginContent() {
 
               {/* REGISTRARSE */}
               <TabsContent value="signup">
-                <form onSubmit={handleSignUp} className="space-y-4">
+                <form onSubmit={handleSignUp} noValidate className="space-y-4">
+                  {/* Banner de error inline */}
+                  {authError && (
+                    <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-red-400 text-xs font-medium flex items-center gap-2 animate-in fade-in-0 duration-200">
+                      <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
+                      <span>{authError}</span>
+                    </div>
+                  )}
                   <div className="space-y-2">
                     <Label htmlFor="signup-email">Correo Electrónico Corporativo</Label>
-                    <div className="relative">
+                    <div className="relative group">
                       <Mail className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
                       <Input
                         id="signup-email"
@@ -202,14 +252,14 @@ function LoginContent() {
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
                         disabled={isPending}
-                        className="pl-9 text-xs"
+                        className="pl-9 text-xs focus:border-emerald-500 focus:ring-emerald-500"
                       />
                     </div>
                   </div>
 
                   <div className="space-y-2">
                     <Label htmlFor="signup-password">Contraseña (Mínimo 6 caracteres)</Label>
-                    <div className="relative">
+                    <div className="relative group">
                       <Lock className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
                       <Input
                         id="signup-password"
@@ -218,7 +268,7 @@ function LoginContent() {
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
                         disabled={isPending}
-                        className="pl-9 text-xs"
+                        className="pl-9 text-xs focus:border-emerald-500 focus:ring-emerald-500"
                       />
                     </div>
                   </div>
@@ -229,10 +279,7 @@ function LoginContent() {
                     className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-semibold h-10 mt-2"
                   >
                     {isPending ? (
-                      <>
-                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                        Creando cuenta...
-                      </>
+                      <ZonlixLoader variant="button" inline size={16} text="Creando cuenta..." />
                     ) : (
                       <>
                         <UserPlus className="w-4 h-4 mr-2" />
@@ -253,8 +300,12 @@ function LoginContent() {
 export default function LoginPage() {
   return (
     <Suspense fallback={
+      // ZonlixLoader: consistencia total de marca — el Suspense se dispara antes de que cualquier
+      // componente cliente esté listo, pero ZonlixLoader ya es server-safe porque solo depende
+      // de framer-motion que está lazy-loaded; usar ZonlixLoader aquí es preferible a Loader2
+      // ya que ambos son client components, y mantiene 100% de identidad visual de marca.
       <div className="flex min-h-screen items-center justify-center bg-background">
-        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+        <ZonlixLoader size={48} />
       </div>
     }>
       <LoginContent />

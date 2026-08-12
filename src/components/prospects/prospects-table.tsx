@@ -18,7 +18,7 @@ import { ScoreBadge } from "@/components/prospects/score-badge";
 import { StatusSelect } from "@/components/prospects/status-select";
 import { Search, Globe, Star, EyeOff, ExternalLink, Download, PlusCircle, CheckCircle2, XCircle, MessageSquare, Phone, MessageCircle } from "lucide-react";
 import type { ProspectRow, AuditRow, ProspectStatus, ScoreTier } from "@/types";
-import { cn, prospectStatusLabels, getPhoneInfo } from "@/lib/utils";
+import { cn, prospectStatusLabels, getPhoneInfo, getCleanDomain } from "@/lib/utils";
 
 import { Checkbox } from "@/components/ui/checkbox";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetTrigger } from "@/components/ui/sheet";
@@ -284,21 +284,21 @@ export function ProspectsTable({ prospects }: ProspectsTableProps) {
                         </Link>
                         {prospect.sitio_web ? (
                           <a
-                            href={prospect.sitio_web}
+                            href={prospect.sitio_web.startsWith('http') ? prospect.sitio_web : `https://${prospect.sitio_web}`}
                             target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex items-center text-xs text-muted-foreground hover:text-primary transition-colors mt-0.5"
+                            rel="noopener noreferrer"
+                            className="text-[11px] text-emerald-400/90 hover:text-emerald-300 hover:underline font-mono truncate max-w-[200px] block mt-1"
+                            title={prospect.sitio_web}
                           >
-                            <Globe className="w-3 h-3 mr-1" />
-                            {prospect.sitio_web.replace(/^https?:\/\//, "").replace(/\/$/, "")}
+                            {getCleanDomain(prospect.sitio_web)}
                           </a>
                         ) : (
-                          <span className="text-xs text-muted-foreground italic">Sin sitio web</span>
+                          <span className="text-[11px] text-zinc-500 block mt-1">Sin sitio web</span>
                         )}
                       </div>
                     </TableCell>
 
-                    <TableCell>
+                    <TableCell className="align-middle">
                       <Sheet>
                         <SheetTrigger className="cursor-pointer hover:opacity-80 transition-opacity text-left bg-transparent border-0 p-0 m-0">
                           <ScoreBadge score={prospect.audit?.score} tier={prospect.audit?.tier} showOpportunityLabel />

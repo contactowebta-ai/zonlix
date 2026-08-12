@@ -60,15 +60,17 @@ export function PipelineBoard({ prospects }: PipelineBoardProps) {
         <div className="flex items-center gap-2">
           <button 
             onClick={scrollLeft}
-            className="p-2 rounded-lg bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-800 transition-all"
+            aria-label="Desplazar a la izquierda"
             title="Desplazar a la izquierda"
+            className="p-2.5 rounded-full bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-200 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 shadow-sm transition-all duration-200 active:scale-95"
           >
             <ChevronLeft className="w-4 h-4"/>
           </button>
           <button 
             onClick={scrollRight}
-            className="p-2 rounded-lg bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-800 transition-all"
+            aria-label="Desplazar a la derecha"
             title="Desplazar a la derecha"
+            className="p-2.5 rounded-full bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-200 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 shadow-sm transition-all duration-200 active:scale-95"
           >
             <ChevronRight className="w-4 h-4"/>
           </button>
@@ -77,7 +79,7 @@ export function PipelineBoard({ prospects }: PipelineBoardProps) {
       
       <div 
         ref={kanbanRef}
-        className="flex gap-4 overflow-x-auto pb-6 w-full max-w-full scrollbar-none items-start h-[calc(100vh-180px)] min-h-[500px] snap-x"
+        className="flex gap-4 overflow-x-auto pb-4 pt-2 scroll-smooth scrollbar-thin scrollbar-thumb-zinc-800 scrollbar-track-transparent min-h-[calc(100vh-180px)] snap-x"
       >
         {columns.map((statusKey) => {
           const columnProspects = localProspects.filter((p) => p.status === statusKey);

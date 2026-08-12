@@ -352,10 +352,13 @@ export type AuditJobInput = z.infer<typeof auditJobSchema>;
 export const profileFormSchema = z.object({
   sector: z.string().min(1, "Selecciona un sector"),
   sector_personalizado: z.string().max(200).optional().or(z.literal("")),
-  descripcion: z.string().max(300, "La descripción no puede superar los 300 caracteres"),
+  descripcion: z.string().max(1000, "La descripción no puede superar los 1000 caracteres"),
   sitio_web: z.string().url("URL inválida").or(z.literal("")).optional(),
   portafolio_url: z.string().url("URL inválida").or(z.literal("")).optional(),
   precio_promedio: z.coerce.number().min(0, "El precio debe ser mayor o igual a 0").optional(),
+  /** Divisa del ticket promedio. Solo existe en frontend — no hay columna en DB, se persiste
+   *  como contexto inyectado en los prompts de Gemini. Fallback defensivo: "MXN". */
+  moneda: z.enum(["USD", "MXN", "COP", "CLP", "PEN", "ARS", "EUR"]).default("MXN"),
   linkedin_url: z.string().url("URL inválida").or(z.literal("")).optional(),
   instagram_url: z.string().url("URL inválida").or(z.literal("")).optional(),
   facebook_url: z.string().url("URL inválida").or(z.literal("")).optional(),

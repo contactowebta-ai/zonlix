@@ -5,23 +5,28 @@ interface ZonlixLoaderProps {
   size?: number;
   text?: string;
   inline?: boolean;
+  variant?: "default" | "button";
 }
 
-export function ZonlixLoader({ size = 48, text, inline = false }: ZonlixLoaderProps) {
+export function ZonlixLoader({ size = 48, text, inline = false, variant = "default" }: ZonlixLoaderProps) {
+  const actualSize = variant === "button" ? 16 : size;
+  
   const svgContent = (
     <svg
       viewBox="0 0 64 64"
-      width={size}
-      height={size}
+      width={actualSize}
+      height={actualSize}
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
+      className={variant === "button" ? "shrink-0" : ""}
     >
       <polyline
         points="8,13 56,13 8,51 56,51"
-        stroke="#111827"
+        stroke="currentColor"
         strokeWidth="5.5"
         strokeLinecap="square"
         strokeLinejoin="miter"
+        className={variant === "button" ? "" : "stroke-slate-900 dark:stroke-slate-100"}
       />
       {/* Nodo con pulso de resplandor IA */}
       <motion.polygon
@@ -40,11 +45,11 @@ export function ZonlixLoader({ size = 48, text, inline = false }: ZonlixLoaderPr
     </svg>
   );
 
-  if (inline) {
+  if (inline || variant === "button") {
     return (
-      <span className="inline-flex items-center gap-2">
+      <span className={`inline-flex items-center ${variant === "button" ? "gap-1.5" : "gap-2"}`}>
         {svgContent}
-        {text && <span className="animate-pulse">{text}</span>}
+        {text && <span className={variant === "button" ? "" : "animate-pulse"}>{text}</span>}
       </span>
     );
   }
@@ -62,3 +67,4 @@ export function ZonlixLoader({ size = 48, text, inline = false }: ZonlixLoaderPr
     </div>
   );
 }
+

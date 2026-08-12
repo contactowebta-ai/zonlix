@@ -88,12 +88,12 @@ export function PipelineColumn({ statusKey, prospects, onMoveProspect }: Pipelin
   ];
 
   return (
-    <div className="w-[280px] min-w-[280px] flex-shrink-0 snap-center flex flex-col min-h-0 h-full max-h-[calc(100vh-220px)]">
+    <div className="w-72 sm:w-80 shrink-0 flex flex-col bg-zinc-100/80 dark:bg-zinc-900/50 rounded-xl border border-zinc-200/80 dark:border-zinc-800/80 p-3 h-full max-h-[calc(100vh-220px)] snap-center">
       {/* Header Columna */}
       <div className="flex items-center justify-between mb-3 shrink-0">
         <div className={`px-3 py-1.5 rounded-full border text-xs font-bold ${badgeColor} flex items-center gap-2 w-full justify-between`}>
-          <span>{columnTitle}</span>
-          <span className="flex items-center justify-center w-5 h-5 rounded-full bg-black/10 dark:bg-white/10 text-[10px] font-mono transition-all">
+          <span className="text-zinc-800 dark:text-zinc-200 font-semibold">{columnTitle}</span>
+          <span className="flex items-center justify-center w-5 h-5 rounded-full bg-zinc-200/80 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 text-[10px] font-mono transition-all">
             {prospects.length}
           </span>
         </div>
@@ -117,7 +117,7 @@ export function PipelineColumn({ statusKey, prospects, onMoveProspect }: Pipelin
                 key={prospect.id} 
                 draggable={true}
                 onDragStart={(e) => handleDragStart(e, prospect.id)}
-                className="p-3.5 bg-white dark:bg-zinc-900/90 hover:bg-zinc-50 dark:hover:bg-zinc-800/80 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-sm transition-all cursor-grab active:cursor-grabbing shrink-0"
+                className="p-3.5 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800/80 border border-zinc-200 dark:border-zinc-800/80 rounded-xl shadow-sm transition-all cursor-grab active:cursor-grabbing shrink-0"
               >
                 <CardContent className="p-0">
                   {/* Fila 1 */}
@@ -125,7 +125,7 @@ export function PipelineColumn({ statusKey, prospects, onMoveProspect }: Pipelin
                     <div className="flex-1 min-w-0">
                       <Link
                         href={`/prospectos/${prospect.id}`}
-                        className="font-semibold text-sm text-zinc-900 dark:text-zinc-100 truncate block hover:text-primary transition-colors"
+                        className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 truncate leading-tight tracking-wide block hover:text-primary transition-colors"
                         title={prospect.nombre_empresa}
                       >
                         {cleanCompanyName(prospect.nombre_empresa)}
@@ -140,14 +140,14 @@ export function PipelineColumn({ statusKey, prospects, onMoveProspect }: Pipelin
                       <DropdownMenuTrigger className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 shrink-0 p-1 -mr-1 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors border-none bg-transparent cursor-pointer">
                         <MoreVertical className="w-4 h-4" />
                       </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="z-50 w-48 bg-zinc-900 border border-zinc-800 text-zinc-100 shadow-2xl rounded-lg p-1">
-                        <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground">Mover a...</div>
+                      <DropdownMenuContent align="end" className="z-50 w-48 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-2xl rounded-lg p-1">
+                        <div className="px-2 py-1.5 text-xs font-semibold text-zinc-500 dark:text-zinc-400">Mover a...</div>
                         {allStatuses.map(status => (
                           <DropdownMenuItem
                             key={status}
                             disabled={status === statusKey}
                             onClick={() => onMoveProspect(prospect.id, status)}
-                            className="cursor-pointer hover:bg-zinc-800 focus:bg-zinc-800 text-sm px-3 py-2 rounded-md transition-colors"
+                            className="cursor-pointer text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 focus:bg-zinc-100 dark:focus:bg-zinc-800 text-sm px-3 py-2 rounded-md transition-colors"
                           >
                             {prospectStatusLabels[status]}
                           </DropdownMenuItem>

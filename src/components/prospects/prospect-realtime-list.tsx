@@ -6,11 +6,13 @@
  * Muestra los resultados de búsqueda en Staging (desde searches.results_json)
  * y permite importar prospectos individualmente al CRM mediante importProspectToCRM.
  */
-import React, { useState, useEffect, useCallback, useTransition } from "react";
+import React, { useState, useEffect, useCallback, useTransition, useRef } from "react";
+import { motion } from "framer-motion";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { useRealtimeSearchResults } from "@/lib/supabase/realtime";
 import { importProspectToCRM } from "@/app/actions/prospects.actions";
+import { calculateAuditCreditCost } from "@/lib/credits";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -27,48 +29,17 @@ import { toast } from "sonner";
 import type { ApifyPlace } from "@/types/schemas";
 import { cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
+import { ProspectsLoadingSkeleton } from "@/components/search/prospects-loading-skeleton";
 
 interface ProspectRealtimeListProps {
   searchId: string;
   initialStatus: string;
+  onStatusChange?: (status: string) => void;
 }
 
-export function ProspectRealtimeList({ searchId, initialStatus }: ProspectRealtimeListProps) {
+export function ProspectRealtimeList({ searchId, initialStatus, onStatusChange }: ProspectRealtimeListProps) {
   const router = useRouter();
 
-  const ZonlixTableLoader = () => (
-    <div className="flex flex-col items-center justify-center py-20 gap-4 transition-opacity duration-300">
-      <div className="relative animate-pulse drop-shadow-[0_0_15px_rgba(16,185,129,0.4)]">
-        <svg
-          viewBox="0 0 64 64"
-          className="w-14 h-14"
-          fill="none"
-          xmlns="http://www.w3.org/2000/svg"
-        >
-          <polyline
-            points="8,13 56,13 8,51 56,51"
-            stroke="currentColor"
-            className="text-zinc-800 dark:text-zinc-200"
-            strokeWidth="5.5"
-            strokeLinecap="square"
-            strokeLinejoin="miter"
-          />
-          <polygon
-            points="32,26.5 37.5,32 32,37.5 26.5,32"
-            fill="#10b981"
-          />
-        </svg>
-      </div>
-      <div className="flex flex-col items-center gap-1.5 mt-2 text-center px-4">
-        <h3 className="font-semibold text-sm text-zinc-700 dark:text-zinc-100">
-          Extrayendo y auditando empresas con IA...
-        </h3>
-        <p className="text-xs text-zinc-500 dark:text-zinc-400">
-          Esto toma unos segundos mientras consultamos Google Maps en vivo.
-        </p>
-      </div>
-    </div>
-  );
   const [stagedPlaces, setStagedPlaces] = useState<ApifyPlace[]>([]);
   const [requestedLimit, setRequestedLimit] = useState<number>(0);
   const [searchQuery, setSearchQuery] = useState<string>("");
@@ -81,8 +52,36 @@ export function ProspectRealtimeList({ searchId, initialStatus }: ProspectRealti
   const [importingTitle, setImportingTitle] = useState<string | null>(null);
   const [previewPlace, setPreviewPlace] = useState<ApifyPlace | null>(null);
   const [, startTransition] = useTransition();
+  const [userCredits, setUserCredits] = useState<number | null>(null);
 
-  // Cargar datos de la búsqueda (results_json) y prospectos ya importados
+  // Cargar créditos del usuario al montar (mismo patrón que search-bar.tsx)
+  useEffect(() => {
+    const fetchCredits = async () => {
+      const supabase = createClient();
+      const { data } = await supabase.auth.getUser();
+      if (data?.user) {
+        const { data: profile } = await (supabase.from("profiles") as any)
+          .select("credits_remaining")
+          .eq("id", data.user.id)
+          .single();
+        if (profile) {
+          setUserCredits((profile as any).credits_remaining ?? 0);
+        }
+      }
+    };
+    fetchCredits();
+  }, []);
+
+  // Notificar al padre cuando cambie el estado
+  const lastReportedStatusRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (onStatusChange && searchState !== lastReportedStatusRef.current) {
+      lastReportedStatusRef.current = searchState;
+      onStatusChange(searchState);
+    }
+  }, [searchState, onStatusChange]);
+
   const fetchSearchData = useCallback(async () => {
     try {
       setLoading(true);
@@ -188,54 +187,53 @@ export function ProspectRealtimeList({ searchId, initialStatus }: ProspectRealti
     onAuditInsert: () => {},
   });
 
-  // Re-fetch cada 5s mientras está procesando.
-  // Después de 15s sin resultados, activar fallback que consulta Apify directamente.
-  const [processingElapsed, setProcessingElapsed] = useState(0);
+  const [extractedCount, setExtractedCount] = useState<number>(0);
 
+  // Polling unificado: consulta Supabase y Apify para recuperar el avance parcial
   useEffect(() => {
     if (searchState === "procesando" || searchState === "pendiente") {
       const interval = setInterval(async () => {
-        setProcessingElapsed((prev) => prev + 5);
-
-        // Primero re-fetch normal (quizás el webhook ya actualizó Supabase)
-        await fetchSearchData();
-      }, 5000);
-      return () => clearInterval(interval);
-    } else {
-      setProcessingElapsed(0);
-    }
-  }, [searchState, fetchSearchData]);
-
-  // Fallback: si llevamos más de 15s procesando y aún sin resultados, consultar directamente
-  useEffect(() => {
-    if (processingElapsed >= 15 && stagedPlaces.length === 0 && (searchState === "procesando" || searchState === "pendiente")) {
-      (async () => {
         try {
           if (process.env.NODE_ENV === "development") {
-            console.log("[Engine] Activando fallback de sincronización...");
+            console.log("[Engine] Polling avance parcial...");
           }
           const { checkSearchFallback } = await import("@/app/actions/prospects.actions");
           const result = await checkSearchFallback(searchId);
-          if (process.env.NODE_ENV === "development") {
-            console.log("[Engine] Fallback result:", result);
-          }
-          if (result.success && result.data?.status === "completado") {
-            // Refresh data
-            await fetchSearchData();
-            toast.success(`${result.data.count} prospectos encontrados.`);
+          
+          if (result.success) {
+             if (result.data?.status === "procesando" && result.data?.partialCount !== undefined) {
+               setExtractedCount(result.data.partialCount);
+             } else if (result.data?.status === "completado") {
+               // Refresh data y limpia contador si terminó
+               await fetchSearchData();
+               toast.success(`${result.data.count} prospectos encontrados.`);
+             }
           }
         } catch (err) {
-          if (process.env.NODE_ENV === "development") {
-            console.error("[Engine] Error en fallback sync:", err);
-          }
+          console.error("[Engine] Error polling fallback:", err);
         }
-      })();
+        
+        // También re-fetch normal por si el webhook funcionó por otro lado
+        await fetchSearchData();
+      }, 5000);
+      return () => clearInterval(interval);
     }
-  }, [processingElapsed, stagedPlaces.length, searchState, searchId, fetchSearchData]);
+  }, [searchState, searchId, fetchSearchData]);
 
 
   const handleImport = (place: ApifyPlace) => {
     const placeTitle = place.title || (place as any).name || "Sin nombre";
+    const cost = calculateAuditCreditCost(Boolean(place.website));
+
+    // Validar saldo antes de iniciar el pipeline IA
+    if (userCredits !== null && userCredits < cost) {
+      toast.error("Límite de Créditos Alcanzado", {
+        description: `Esta auditoría requiere ${cost} créditos y solo tienes ${userCredits}. Espera tu fecha de renovación o contacta soporte.`,
+        duration: 6000,
+      });
+      return;
+    }
+
     setImportingTitle(placeTitle);
     startTransition(async () => {
       try {
@@ -248,6 +246,11 @@ export function ProspectRealtimeList({ searchId, initialStatus }: ProspectRealti
           toast.success(`"${placeTitle}" importado y auditado con éxito.`);
           // Redirigir inmediatamente a la vista individual del prospecto importado
           router.push(`/prospectos/${result.data.prospectId}`);
+        } else if (result.error === "INSUFFICIENT_CREDITS") {
+          toast.error("Límite de Créditos Alcanzado", {
+            description: "Has consumido tus créditos del periodo. Espera a tu fecha de renovación o contacta a soporte para un upgrade.",
+            duration: 6000,
+          });
         } else {
           toast.error(result.error || "Error al importar el prospecto");
         }
@@ -259,6 +262,10 @@ export function ProspectRealtimeList({ searchId, initialStatus }: ProspectRealti
 
     });
   };
+
+  const currentCount = Math.max(stagedPlaces.length, extractedCount);
+  const targetCount = requestedLimit > 0 ? requestedLimit : 10;
+  const progressPercentage = Math.min(100, Math.round((currentCount / targetCount) * 100));
 
   return (
     <div className="space-y-4">
@@ -276,9 +283,29 @@ export function ProspectRealtimeList({ searchId, initialStatus }: ProspectRealti
                 ? "Extrayendo empresas de Google Maps en segundo plano..."
                 : "Búsqueda finalizada"}
             </h3>
-            <p className="text-xs text-muted-foreground">
-              {stagedPlaces.length} prospectos listos para auditar e importar.
-            </p>
+            {searchState === "procesando" || searchState === "pendiente" ? (
+              <div className="mt-1 flex items-center gap-2 px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/20 rounded-full w-fit">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                </span>
+                <span className="text-xs font-mono font-medium text-emerald-400 flex items-center gap-1">
+                  <motion.span
+                    key={currentCount}
+                    initial={{ scale: 1.2, opacity: 0.5 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    className="inline-block"
+                  >
+                    {currentCount}
+                  </motion.span>
+                  / {targetCount} prospectos extraídos ({progressPercentage}%)
+                </span>
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground mt-1">
+                {currentCount} prospectos listos para auditar e importar.
+              </p>
+            )}
           </div>
         </div>
       </div>
@@ -309,172 +336,175 @@ export function ProspectRealtimeList({ searchId, initialStatus }: ProspectRealti
       )}
 
       {/* Tabla de Resultados en Staging */}
-      <Card className="border-border bg-card">
-        <CardContent className="p-0">
-          <Table className="table-fixed w-full">
-            <TableHeader>
-              <TableRow className="border-border hover:bg-transparent">
-                <TableHead className="w-[30%] py-2 px-2">Empresa</TableHead>
-                <TableHead className="w-[35%] py-2 px-2">Teléfono / Dirección</TableHead>
-                <TableHead className="w-[15%] py-2 px-2">Google Rating</TableHead>
-                <TableHead className="w-[20%] py-2 px-2 text-right">Acciones</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(loading || searchState === "procesando" || searchState === "pendiente") && stagedPlaces.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={4} className="h-64 p-0">
-                    <ZonlixTableLoader />
-                  </TableCell>
+      {(loading || searchState === "procesando" || searchState === "pendiente") && stagedPlaces.length === 0 ? (
+        <ProspectsLoadingSkeleton />
+      ) : (
+        <Card className="border-border bg-card">
+          <CardContent className="p-0">
+            <Table className="table-fixed w-full">
+              <TableHeader>
+                <TableRow className="border-border hover:bg-transparent">
+                  <TableHead className="w-[30%] py-2 px-2">Empresa</TableHead>
+                  <TableHead className="w-[35%] py-2 px-2">Teléfono / Dirección</TableHead>
+                  <TableHead className="w-[15%] py-2 px-2">Google Rating</TableHead>
+                  <TableHead className="w-[20%] py-2 px-2 text-right">Acciones</TableHead>
                 </TableRow>
-              ) : stagedPlaces.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={4} className="h-48 text-center py-8">
-                    {originalQuery && originalQuery !== searchQuery ? (
-                      <div className="flex flex-col items-center gap-3">
+              </TableHeader>
+              <TableBody>
+                {stagedPlaces.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={4} className="h-48 text-center py-8">
+                      {originalQuery && originalQuery !== searchQuery ? (
+                        <div className="flex flex-col items-center gap-3">
+                          <span className="text-muted-foreground text-sm">
+                            No encontramos resultados para &apos;{originalQuery}&apos;. ¿Quisiste decir <strong className="text-foreground">{searchQuery}</strong>?
+                          </span>
+                          <Button 
+                            variant="outline" 
+                            size="sm"
+                            onClick={() => {
+                              // Enlaza a crear una nueva búsqueda con los términos corregidos
+                              const params = new URLSearchParams();
+                              params.set('q', searchQuery);
+                              if (searchLocation) params.set('loc', searchLocation);
+                              router.push(`/buscar?${params.toString()}`);
+                            }}
+                          >
+                            Buscar como &apos;{searchQuery}&apos;
+                          </Button>
+                        </div>
+                      ) : (
                         <span className="text-muted-foreground text-sm">
-                          No encontramos resultados para &apos;{originalQuery}&apos;. ¿Quisiste decir <strong className="text-foreground">{searchQuery}</strong>?
+                          No se encontraron prospectos en esta búsqueda.
                         </span>
-                        <Button 
-                          variant="outline" 
-                          size="sm"
-                          onClick={() => {
-                            // Enlaza a crear una nueva búsqueda con los términos corregidos
-                            const params = new URLSearchParams();
-                            params.set('q', searchQuery);
-                            if (searchLocation) params.set('loc', searchLocation);
-                            router.push(`/buscar?${params.toString()}`);
-                          }}
-                        >
-                          Buscar como &apos;{searchQuery}&apos;
-                        </Button>
-                      </div>
-                    ) : (
-                      <span className="text-muted-foreground text-sm">
-                        No se encontraron prospectos en esta búsqueda.
-                      </span>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ) : (
-                stagedPlaces.map((place, index) => {
-                  const title = place.title || (place as any).name || "Sin nombre";
-                  const prospectId = importedMap[title];
-                  const isImported = Boolean(prospectId);
-                  const isImporting = importingTitle === title;
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  stagedPlaces.map((place, index) => {
+                    const title = place.title || (place as any).name || "Sin nombre";
+                    const prospectId = importedMap[title];
+                    const isImported = Boolean(prospectId);
+                    const isImporting = importingTitle === title;
 
-                  return (
-                    <TableRow key={index} className="border-border hover:bg-muted/30">
-                      <TableCell className="py-2 px-2 align-top font-medium">
-                        <div className="flex flex-col max-w-[200px] sm:max-w-[250px]">
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm font-semibold text-foreground truncate">
-                              {title}
-                            </span>
-                            {place.en_crm && (
-                              <span className="text-[10px] bg-primary/10 text-primary px-1.5 py-0.5 rounded-md border border-primary/20 shrink-0">
-                                En CRM
+                    return (
+                      <TableRow key={index} className="border-border hover:bg-muted/30">
+                        <TableCell className="py-2 px-2 align-top font-medium">
+                          <div className="flex flex-col max-w-[200px] sm:max-w-[250px]">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-semibold text-foreground truncate">
+                                {title}
                               </span>
+                              {place.en_crm && (
+                                <span className="text-[10px] bg-primary/10 text-primary px-1.5 py-0.5 rounded-md border border-primary/20 shrink-0">
+                                  En CRM
+                                </span>
+                              )}
+                            </div>
+
+                            {place.website ? (
+                              <a
+                                href={place.website}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center text-xs text-muted-foreground hover:text-primary transition-colors mt-0.5 truncate max-w-full"
+                              >
+                                <Globe className="w-3 h-3 mr-1 shrink-0" />
+                                <span className="truncate">{place.website.replace(/^https?:\/\//, "").replace(/\/$/, "")}</span>
+                              </a>
+                            ) : (
+                              <span className="text-xs text-muted-foreground italic">Sin sitio web</span>
                             )}
                           </div>
+                        </TableCell>
 
-                          {place.website ? (
-                            <a
-                              href={place.website}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="inline-flex items-center text-xs text-muted-foreground hover:text-primary transition-colors mt-0.5 truncate max-w-full"
-                            >
-                              <Globe className="w-3 h-3 mr-1 shrink-0" />
-                              <span className="truncate">{place.website.replace(/^https?:\/\//, "").replace(/\/$/, "")}</span>
-                            </a>
-                          ) : (
-                            <span className="text-xs text-muted-foreground italic">Sin sitio web</span>
-                          )}
-                        </div>
-                      </TableCell>
-
-                      <TableCell className="py-2 px-2 align-top text-xs text-muted-foreground">
-                        <div className="flex flex-col gap-0.5 max-w-[200px] sm:max-w-[250px]">
-                          <span className="truncate">{place.phone ?? "Sin teléfono"}</span>
-                          <span className="truncate block text-[11px]">
-                            {place.address ?? "Sin dirección"}
-                          </span>
-                        </div>
-                      </TableCell>
-
-                      <TableCell className="py-2 px-2 align-top">
-                        {place.totalScore ? (
-                          <div className="flex items-center gap-1 text-xs whitespace-nowrap">
-                            <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400 shrink-0" />
-                            <span className="font-medium">{place.totalScore}</span>
-                            <span className="text-muted-foreground">({place.reviewsCount ?? 0})</span>
-                          </div>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">N/A</span>
-                        )}
-                      </TableCell>
-
-                      <TableCell className="py-2 px-2 align-top text-right">
-                        <div className="flex flex-col sm:flex-row items-end sm:items-center justify-end gap-1.5">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="px-2 py-1.5 h-auto text-[11px] gap-1"
-                            onClick={() => setPreviewPlace(place)}
-                          >
-                            <Eye className="w-3 h-3 shrink-0" />
-                            <span className="hidden sm:inline">Vista Previa</span>
-                          </Button>
-
-                          {isImported ? (
-                            <div className="flex items-center gap-1.5">
-                              <span className="hidden sm:inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-500">
-                                <CheckCircle2 className="w-3 h-3" />
-                                Importado
+                        <TableCell className="py-2 px-2 align-top text-xs text-muted-foreground">
+                          <div className="space-y-0.5 min-w-0">
+                            {place.phone ? (
+                              <span className="text-xs text-zinc-200 block font-mono truncate">{place.phone}</span>
+                            ) : (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-zinc-800/80 text-zinc-400 border border-zinc-700/50">
+                                Sin teléfono
                               </span>
-                              <Link
-                                href={`/prospectos/${prospectId}`}
-                                className={cn(
-                                  buttonVariants({ variant: "outline", size: "sm" }),
-                                  "px-2 py-1.5 h-auto text-[11px] gap-1"
-                                )}
-                              >
-                                Ver
-                                <ExternalLink className="w-3 h-3 shrink-0" />
-                              </Link>
+                            )}
+                            <p className="text-[11px] text-zinc-400 truncate max-w-[220px]" title={place.address || undefined}>
+                              {place.address || 'Sin dirección registrada'}
+                            </p>
+                          </div>
+                        </TableCell>
+
+                        <TableCell className="py-2 px-2 align-top">
+                          <div className="flex flex-col items-start gap-1 min-w-0">
+                            <div className="flex items-center gap-1 text-xs text-amber-400 font-medium">
+                              <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400 shrink-0" />
+                              <span>{place.totalScore || 'N/A'}</span>
+                              {place.reviewsCount ? <span className="text-zinc-500 text-[11px]">({place.reviewsCount})</span> : null}
                             </div>
-                          ) : (
-                            <Button
-                              size="sm"
-                              disabled={isImporting}
-                              onClick={() => handleImport(place)}
-                              className="px-2 py-1.5 h-auto text-[11px] gap-1 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold"
+                            <button 
+                              onClick={() => setPreviewPlace(place)}
+                              className="inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-emerald-400 underline transition-colors"
                             >
-                              {isImporting ? (
-                                <>
-                                  <Loader2 className="w-3 h-3 animate-spin shrink-0" />
-                                  <span className="hidden sm:inline">Auditando...</span>
-                                </>
-                              ) : (
-                                <>
-                                  <Sparkles className="w-3 h-3 shrink-0" />
-                                  <span className="hidden xl:inline">Auditar e Importar</span>
-                                  <span className="xl:hidden">Importar</span>
-                                </>
-                              )}
-                            </Button>
-                          )}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })
-              )}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+                              <Eye className="w-3 h-3"/>
+                              Vista Previa
+                            </button>
+                          </div>
+                        </TableCell>
+
+                        <TableCell className="py-2 px-2 align-top text-right">
+                          <div className="flex flex-col sm:flex-row items-end sm:items-center justify-end gap-1.5">
+
+                            {isImported ? (
+                              <div className="flex items-center gap-1.5">
+                                <span className="hidden sm:inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-500">
+                                  <CheckCircle2 className="w-3 h-3" />
+                                  Importado
+                                </span>
+                                <Link
+                                  href={`/prospectos/${prospectId}`}
+                                  className={cn(
+                                    buttonVariants({ variant: "outline", size: "sm" }),
+                                    "px-2 py-1.5 h-auto text-[11px] gap-1"
+                                  )}
+                                >
+                                  Ver
+                                  <ExternalLink className="w-3 h-3 shrink-0" />
+                                </Link>
+                              </div>
+                            ) : (
+                              <Button
+                                size="sm"
+                                disabled={isImporting || (userCredits !== null && userCredits < calculateAuditCreditCost(Boolean(place.website)))}
+                                onClick={() => handleImport(place)}
+                                className="px-2 py-1.5 h-auto text-[11px] gap-1 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold"
+                              >
+                                {isImporting ? (
+                                  <>
+                                    <Loader2 className="w-3 h-3 animate-spin shrink-0" />
+                                    <span className="hidden sm:inline">Auditando...</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Sparkles className="w-3 h-3 shrink-0" />
+                                    <span className="hidden xl:inline">Auditar e Importar</span>
+                                    <span className="xl:hidden">Importar</span>
+                                    <span className="bg-black/20 text-emerald-100 text-[10px] font-semibold px-1.5 py-0.5 rounded-md ml-0.5">
+                                      {calculateAuditCreditCost(Boolean(place.website))} cr
+                                    </span>
+                                  </>
+                                )}
+                              </Button>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
+                )}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Modal de Vista Previa */}
       <Dialog open={!!previewPlace} onOpenChange={(open) => !open && setPreviewPlace(null)}>
@@ -574,6 +604,14 @@ export function ProspectRealtimeList({ searchId, initialStatus }: ProspectRealti
               <Button 
                 onClick={() => {
                   if (previewPlace) {
+                    const cost = calculateAuditCreditCost(Boolean(previewPlace.website));
+                    if (userCredits !== null && userCredits < cost) {
+                      toast.error("Límite de Créditos Alcanzado", {
+                        description: `Esta auditoría requiere ${cost} créditos y solo tienes ${userCredits}. Espera tu fecha de renovación o contacta soporte.`,
+                        duration: 6000,
+                      });
+                      return;
+                    }
                     handleImport(previewPlace);
                     setPreviewPlace(null);
                   }
@@ -583,6 +621,11 @@ export function ProspectRealtimeList({ searchId, initialStatus }: ProspectRealti
               >
                 <Sparkles className="w-4 h-4" />
                 Auditar e Importar
+                {previewPlace && (
+                  <span className="bg-black/20 text-emerald-100 text-[10px] font-semibold px-1.5 py-0.5 rounded-md">
+                    {calculateAuditCreditCost(Boolean(previewPlace.website))} cr
+                  </span>
+                )}
               </Button>
             )}
           </div>

@@ -21,6 +21,7 @@ import {
   type GeminiNormalizedSearchResponse,
 } from "@/types/schemas";
 import type { ProfileRow, ProspectRow } from "@/types/database.types";
+import { sanitizeCompanyName } from "@/lib/utils";
 
 // ============================================
 // CONFIGURACIÓN
@@ -36,7 +37,12 @@ const JSON_GENERATION_CONFIG = {
 // HELPER: Inicialización Dinámica
 // ============================================
 
-const CANDIDATE_MODELS = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro", "gemini-2.0-flash-lite", "gemini-1.5-flash-8b"];
+const GEMINI_MODELS = [
+  "gemini-2.5-flash",
+  "gemini-2.0-flash",
+  "gemini-2.5-flash-lite",
+  "gemini-1.5-flash",
+];
 
 async function getGenAIClient() {
   const rawKey = process.env.GOOGLE_GEMINI_API_KEY || process.env.GEMINI_API_KEY || '';
@@ -65,7 +71,7 @@ export async function callGeminiWithTimeout(
   overrideModel?: string
 ): Promise<string> {
   const genAI = await getGenAIClient();
-  const modelsToTry = overrideModel ? [overrideModel] : CANDIDATE_MODELS;
+  const modelsToTry = overrideModel ? [overrideModel] : GEMINI_MODELS;
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     for (const modelName of modelsToTry) {
@@ -80,14 +86,16 @@ export async function callGeminiWithTimeout(
         const result = await model.generateContent(prompt);
         return result.response.text();
       } catch (error: any) {
-        if (error?.status === 404 || error?.message?.includes('404')) {
-          console.warn(`[GEMINI WARN] Modelo ${modelName} no encontrado, probando siguiente...`);
+        const errMsg = error instanceof Error ? error.message : String(error);
+        
+        if (error?.status === 404 || errMsg.includes('404') || errMsg.includes('not found')) {
+          console.warn(`[GEMINI WARN] Modelo ${modelName} no encontrado (404), probando siguiente modelo de la lista...`);
           clearTimeout(timeout);
           continue;
         }
 
-        console.error("[GEMINI ERROR REAL]:", error);
-        const errMsg = error instanceof Error ? error.message : String(error);
+        console.error(`[GEMINI ERROR REAL en ${modelName}]:`, errMsg);
+        console.error("[GEMINI DETALLE TÉCNICO]:", error);
         const isRateLimit =
           errMsg.includes("429") ||
           errMsg.includes("RESOURCE_EXHAUSTED") ||
@@ -155,13 +163,15 @@ export async function auditWebsite(
   markdown: string | null,
   prospect: Partial<ProspectRow> & { nombre_empresa: string; categoryName?: string | null }
 ): Promise<GeminiAuditResponse> {
+  const cleanName = sanitizeCompanyName(prospect.nombre_empresa);
+
   const contentSection = markdown
     ? `## Contenido del sitio web (Markdown):\n\n${markdown}`
     : `## Sitio web: NO DISPONIBLE\nEl sitio web no pudo ser accedido, está caído, tiene errores de certificado SSL, o no existe.`;
 
   const prompt = `Eres un auditor experto en presencia digital para agencias de marketing en Latinoamérica.
 
-Analiza la presencia digital de la empresa "${prospect.nombre_empresa}"${prospect.categoryName ? ` (categoría: ${prospect.categoryName})` : ""}.
+Analiza la presencia digital de la empresa "${cleanName}"${prospect.categoryName ? ` (categoría: ${prospect.categoryName})` : ""}.
 
 ${contentSection}
 
@@ -172,6 +182,9 @@ Evalúa los siguientes criterios:
 3. **Catálogo/portafolio visible**: ¿Muestran claramente sus servicios y precios?
 4. **Información de contacto clara**: ¿Tiene teléfono, email, dirección visibles?
 5. **Actividad reciente**: ¿Tiene blog, noticias o redes sociales activos?
+
+## REGLA DE SUBDOMINIOS GRATUITOS:
+Si la URL del prospecto contiene un subdominio gratuito (ej. wixsite.com, wordpress.com, blogspot.com, weebly.com, site123.me), resalta esto de forma prioritaria en el Diagnóstico (puntos_dolor).
 
 ## Escala de puntuación:
 - **Score 1-2**: Sitio inexistente, caído o completamente roto → MÁXIMA oportunidad de venta
@@ -204,7 +217,7 @@ Devuelve ÚNICAMENTE el siguiente JSON:
     return geminiAuditResponseSchema.parse(parsed);
   } catch (error) {
     console.error(
-      `[auditWebsite] Error o cuota excedida en Gemini para ${prospect.nombre_empresa}. Activando fallback dinámico "Motor Invencible".`,
+      `[auditWebsite] Error o cuota excedida en Gemini para ${cleanName}. Activando fallback dinámico "Motor Invencible".`,
       error
     );
 
@@ -239,8 +252,8 @@ Devuelve ÚNICAMENTE el siguiente JSON:
     }
 
     const resumenIa = hasWebsite 
-      ? `Presencia digital detectada pero requiere optimización técnica y estratégica de conversión para ${prospect.nombre_empresa}.`
-      : `Oportunidad crítica: ${prospect.nombre_empresa} carece de presencia digital y está perdiendo prospectos en línea de forma diaria.`;
+      ? `Presencia digital detectada pero requiere optimización técnica y estratégica de conversión para ${cleanName}.`
+      : `Oportunidad crítica: ${cleanName} carece de presencia digital y está perdiendo prospectos en línea de forma diaria.`;
 
     return {
       score,
@@ -256,16 +269,6 @@ Devuelve ÚNICAMENTE el siguiente JSON:
 // ============================================
 
 /**
- * Limpia el nombre de la empresa para eliminar denominaciones sociales, eslogans y sufijos.
- */
-function cleanCompanyName(name: string): string {
-  if (!name) return "";
-  let cleanName = name.replace(/\b(s\.?a\.?\s+de\s+c\.?v\.?|srl|inc|llc|s\.?a\.?|ltd|co)\b/gi, "");
-  cleanName = cleanName.split(/[,.-]/)[0];
-  return cleanName.trim();
-}
-
-/**
  * Genera 3 mensajes de prospección personalizados por canal.
  * Si falla por cuota o no hay web, devuelve plantillas diversificadas dinámicamente.
  */
@@ -274,7 +277,7 @@ export async function generateMessages(
   prospect: ProspectRow,
   audit: GeminiAuditResponse
 ): Promise<GeminiMessagesResponse> {
-  const cleanName = cleanCompanyName(prospect.nombre_empresa);
+  const cleanName = sanitizeCompanyName(prospect.nombre_empresa);
 
   const isB2B = profile.sector?.toLowerCase().includes("b2b") || 
                 profile.sector?.toLowerCase().includes("industrial") || 
@@ -332,6 +335,22 @@ export async function generateMessages(
 
   const puntosDolor = audit.puntos_dolor.join("; ");
 
+  // Ticket formateado con divisa del perfil (fallback defensivo a MXN si no existe columna)
+  const moneda = (profile as any).moneda || "MXN";
+  const ticketVendedor = profile.precio_promedio
+    ? `${profile.precio_promedio} ${moneda}`
+    : "No especificado";
+
+  const hasWebsite = Boolean(prospect.sitio_web && prospect.sitio_web.trim() !== "" && prospect.sitio_web.trim() !== 'N/A');
+  const websiteDirective = hasWebsite 
+    ? `SITIO WEB DETECTADO: "${prospect.sitio_web}"
+[REGLA DE ORO OBLIGATORIA]: EL PROSPECTO SÍ TIENE SITIO WEB.
+- PROHIBIDO decir o sugerir que "no cuentan con sitio web", "no tienen página" o que "no tienen presencia digital".
+- Enfoca la propuesta comercial ÚNICAMENTE en: optimización de conversión, velocidad de carga, rediseño moderno, migración de subdominio (si aplica) o captura automatizada de clientes.`
+    : `SITIO WEB DETECTADO: Ninguno / No disponible.
+[REGLA DE ORO OBLIGATORIA]: EL PROSPECTO NO TIENE SITIO WEB.
+- Enfoca la propuesta en la creación de su primera landing page profesional, catálogo digital o sistema de agendamiento para convertir el tráfico de Google Maps.`;
+
   const prompt = `Eres un copywriter B2B experto en prospección para agencias de marketing digital en Latinoamérica.
 
 ## Perfil del vendedor:
@@ -340,6 +359,7 @@ export async function generateMessages(
 - Ventajas diferenciales: ${ventajas}
 - Portafolio: ${profile.portafolio_url ?? "disponible bajo solicitud"}
 - Cliente ideal: ${icp}
+- Ticket promedio: ${ticketVendedor}. Utiliza siempre esta divisa y formato monetario cuando hagas referencia a precios, retornos de inversión o propuestas económicas.
 
 ## Diagnóstico del prospecto:
 - Empresa: ${cleanName}
@@ -347,6 +367,17 @@ export async function generateMessages(
 - Score de presencia digital: ${audit.score}/10 (${audit.tier})
 - Puntos de dolor detectados: ${puntosDolor}
 - Resumen del diagnóstico: ${audit.resumen_ia}
+
+${websiteDirective}
+
+## REGLA DE SUBDOMINIOS GRATUITOS:
+Si la URL del prospecto contiene un subdominio gratuito (ej. wixsite.com, wordpress.com, blogspot.com, weebly.com, site123.me), resalta esto de forma prioritaria en la Propuesta de Pitch.
+Utiliza un enfoque comercial directo en el pitch, por ejemplo:
+'Notamos que tu negocio utiliza un subdominio gratuito (${prospect.sitio_web}). Esto puede restar credibilidad B2B frente a tus competidores. Te ayudamos a migrar a un dominio propio (.com / .mx) con un diseño totalmente profesional y optimizado para captar clientes.'
+
+## REGLA DE PERSONALIZACIÓN WHATSAPP:
+NOMBRE DEL NEGOCIO PARA EL SALUDO: '${cleanName}'
+Instrucción estricta para el saludo: Dirígete únicamente como 'Hola equipo de ${cleanName},' o 'Hola gente de ${cleanName},'. NUNCA incluyas la descripción de la empresa ni palabras secundarias en el saludo.
 
 Redacta 3 mensajes de prospección (whatsapp, email.asunto, email.cuerpo, guion_telefonico).
 
@@ -381,10 +412,56 @@ Devuelve ÚNICAMENTE el siguiente JSON:
 
 /**
  * Función que audita el perfil de la agencia del usuario basándose en los datos proporcionados.
+ * Si `portafolio_url` está disponible, intenta scrapear su contenido real con Firecrawl para
+ * cruzarlo contra la descripción declarada por el usuario — análisis "contextual".
  */
 export async function auditAgencyWithAI(
   profileData: any
 ): Promise<GeminiAgencyAuditResponse | null> {
+  // ──────────────────────────────────────────────────────────────────
+  // Paso 1: Intentar scrapear el portafolio si hay URL disponible
+  // ──────────────────────────────────────────────────────────────────
+  const MAX_PORTFOLIO_CHARS = 3_500;
+  let portfolioMarkdown: string | null = null;
+
+  if (profileData.portafolio_url && typeof profileData.portafolio_url === "string") {
+    try {
+      const { scrapeToMarkdown } = await import("@/lib/firecrawl");
+      const raw = await scrapeToMarkdown(profileData.portafolio_url);
+      if (raw) {
+        portfolioMarkdown =
+          raw.length > MAX_PORTFOLIO_CHARS
+            ? raw.slice(0, MAX_PORTFOLIO_CHARS) + "\n\n[Contenido truncado]"
+            : raw;
+      }
+    } catch (scrapeErr) {
+      // Scraping falla silenciosamente; la auditoría continúa sin él
+      console.warn("[auditAgencyWithAI] Scraping de portafolio falló (no bloquea auditoría):", scrapeErr);
+    }
+  }
+
+  const portfolioSection = portfolioMarkdown
+    ? `## Contenido real del portafolio (extraído automáticamente):\n\n${portfolioMarkdown}`
+    : `## Portafolio:\n${
+        profileData.portafolio_url
+          ? "Portafolio no accesible para análisis automático (URL registrada: " + profileData.portafolio_url + ")"
+          : "No especificado"
+      }`;
+
+  // ──────────────────────────────────────────────────────────────────
+  // Paso 2: Construir el prompt con contexto de portafolio
+  // ──────────────────────────────────────────────────────────────────
+  const crossReferenceInstruction = portfolioMarkdown
+    ? `
+ANÁLISIS CRUZADO OBLIGATORIO: Compara lo que el usuario DICE ofrecer en su "Descripción de servicios" contra lo que REALMENTE se observa en el contenido de su portafolio. Si existe una brecha (servicios declarados que el portafolio no demuestra, o fortalezas evidentes en el portafolio no mencionadas en la descripción), señálala explícitamente en el campo "oportunidades" como una oportunidad de alineación o comunicación de valor.`
+    : "";
+
+  // Ticket formateado con divisa del perfil (fallback defensivo a MXN si la columna no existe)
+  const monedaPerfil = (profileData as any).moneda || "MXN";
+  const ticketFormateado = profileData.precio_promedio
+    ? `${profileData.precio_promedio} ${monedaPerfil}`
+    : "No especificado";
+
   const prompt = `Eres un consultor experto en posicionamiento B2B y crecimiento de agencias/empresas de servicios. 
 Tu objetivo es analizar la propuesta de valor y presencia digital de esta agencia para brindarle retroalimentación accionable que le permita cerrar más clientes.
 
@@ -392,8 +469,7 @@ Tu objetivo es analizar la propuesta de valor y presencia digital de esta agenci
 - Sector: ${profileData.sector === "Otro Sector" ? profileData.sector_personalizado : profileData.sector}
 - Descripción de servicios: ${profileData.descripcion || "No especificada"}
 - Sitio Web Oficial: ${profileData.sitio_web || "No especificado"}
-- Portafolio/Casos de éxito: ${profileData.portafolio_url || "No especificado"}
-- Precio promedio (Ticket): ${profileData.precio_promedio ? `$${profileData.precio_promedio} MXN` : "No especificado"}
+- Precio promedio (Ticket): ${ticketFormateado}. Utiliza siempre esta divisa y formato monetario cuando hagas referencia a precios, retornos de inversión o propuestas económicas en los diagnósticos y guiones de prospección.
 - Redes sociales: ${[
   profileData.linkedin_url && "LinkedIn",
   profileData.instagram_url && "Instagram",
@@ -401,10 +477,13 @@ Tu objetivo es analizar la propuesta de valor y presencia digital de esta agenci
 ].filter(Boolean).join(", ") || "No especificadas"}
 - Ventajas diferenciales: ${Array.isArray(profileData.ventajas) ? profileData.ventajas.join(", ") : ""}
 
+${portfolioSection}
+${crossReferenceInstruction}
+
 Genera una auditoría concisa y directa. Debes devolver ÚNICAMENTE un JSON válido con esta estructura exacta:
 {
   "diagnostico_propuesta": "<1 párrafo diagnosticando si su precio, ventajas y servicios están alineados para ser atractivos>",
-  "oportunidades": "<1 párrafo sobre qué elementos le faltan en su presencia digital (sitio web, portafolio, redes) frente a la competencia>",
+  "oportunidades": "<1 párrafo sobre qué elementos le faltan en su presencia digital (sitio web, portafolio, redes) frente a la competencia, e incluye el análisis cruzado descripción vs portafolio si aplica>",
   "sugerencias": "<1 párrafo sobre cómo potenciar sus diferenciadores y posicionarse como autoridad en su nicho>"
 }`;
 
@@ -433,6 +512,7 @@ Genera una auditoría concisa y directa. Debes devolver ÚNICAMENTE un JSON vál
     };
   }
 }
+
 
 function isLikelyGibberish(text: string): boolean {
   const str = text.trim().toLowerCase();
