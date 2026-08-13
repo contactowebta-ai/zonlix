@@ -120,3 +120,14 @@ CREATE POLICY "follow_ups_select_own" ON follow_ups FOR SELECT USING (auth.uid()
 CREATE POLICY "follow_ups_insert_own" ON follow_ups FOR INSERT WITH CHECK (auth.uid() = user_id);
 CREATE POLICY "follow_ups_update_own" ON follow_ups FOR UPDATE USING (auth.uid() = user_id);
 CREATE POLICY "follow_ups_delete_own" ON follow_ups FOR DELETE USING (auth.uid() = user_id);
+
+-- ============================================
+-- 8. LOCK DOWN RPC CREDIT FUNCTIONS
+-- Only the service_role (backend) may call these.
+-- Authenticated/anon users cannot call them directly from the browser.
+-- ============================================
+REVOKE EXECUTE ON FUNCTION decrement_credits(uuid, int) FROM authenticated, anon;
+REVOKE EXECUTE ON FUNCTION increment_credits(uuid, int) FROM authenticated, anon;
+GRANT EXECUTE ON FUNCTION decrement_credits(uuid, int) TO service_role;
+GRANT EXECUTE ON FUNCTION increment_credits(uuid, int) TO service_role;
+

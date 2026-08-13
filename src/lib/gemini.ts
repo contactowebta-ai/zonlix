@@ -207,52 +207,10 @@ Devuelve ÚNICAMENTE el siguiente JSON:
 
     const parsed = JSON.parse(cleanJson);
     return geminiAuditResponseSchema.parse(parsed);
-  } catch (error) {
-    console.error(
-      `[auditWebsite] Error o cuota excedida en Gemini para ${cleanName}. Activando fallback dinámico "Motor Invencible".`,
-      error
-    );
-
-    const hasWebsite = prospect.sitio_web && prospect.sitio_web.trim() !== "";
-    const googleRating = prospect.calificacion_google || 0;
-    
-    // Calcular un score razonable basado en los datos duros
-    let score = 5;
-    if (!hasWebsite) {
-      score = 2; // Muy baja presencia -> Alta oportunidad
-    } else if (googleRating > 4.5) {
-      score = 8; // Presencia fuerte
-    } else if (googleRating > 0 && googleRating < 4) {
-      score = 4; // Baja calificación
-    }
-
-    let tier: "verde" | "amarillo" | "rojo" = "amarillo";
-    if (score <= 4) tier = "verde";
-    else if (score >= 8) tier = "rojo";
-
-    const puntosDolor = [];
-    if (!hasWebsite) {
-      puntosDolor.push("Ausencia total de sitio web profesional o catálogo digital.");
-      puntosDolor.push("Falta de embudo de captación automatizado en WhatsApp.");
-    } else {
-      if (googleRating > 0 && googleRating < 4) {
-        puntosDolor.push("Baja calificación en reseñas de Google Maps, lo que afecta la confianza.");
-      } else {
-        puntosDolor.push("Optimización SEO local pendiente para dominar la búsqueda.");
-      }
-      puntosDolor.push("Falta de sistema automático de seguimiento a prospectos.");
-    }
-
-    const resumenIa = hasWebsite 
-      ? `Presencia digital detectada pero requiere optimización técnica y estratégica de conversión para ${cleanName}.`
-      : `Oportunidad crítica: ${cleanName} carece de presencia digital y está perdiendo prospectos en línea de forma diaria.`;
-
-    return {
-      score,
-      tier,
-      puntos_dolor: puntosDolor,
-      resumen_ia: resumenIa,
-    };
+  } catch (error: any) {
+    console.error(`[auditWebsite] Error en Gemini para ${cleanName}:`, error);
+    // Re-throw so the calling Server Action can refund the credit via increment_credits.
+    throw error;
   }
 }
 
@@ -392,13 +350,10 @@ Devuelve ÚNICAMENTE el siguiente JSON:
 
     const parsed = JSON.parse(cleanJson);
     return geminiMessagesResponseSchema.parse(parsed);
-  } catch (error) {
-    console.error(
-      `[generateMessages] Error o cuota excedida en Gemini para ${prospect.nombre_empresa}. Usando mensajes por defecto.`,
-      error
-    );
-
-    return fallbackMessages;
+  } catch (error: any) {
+    console.error(`[generateMessages] Error en Gemini para ${prospect.nombre_empresa}:`, error);
+    // Re-throw so the calling Server Action can refund the credit via increment_credits.
+    throw error;
   }
 }
 
@@ -488,20 +443,10 @@ Genera una auditoría concisa y directa. Debes devolver ÚNICAMENTE un JSON vál
 
     const parsed = JSON.parse(cleanJson);
     return geminiAgencyAuditSchema.parse(parsed);
-  } catch (error) {
-    const errMsg = error instanceof Error ? error.message : String(error);
-    console.error("[GEMINI ERROR REAL]:", error);
-    console.error("[auditAgencyWithAI] Error en APIs, activando Mock de Emergencia");
-    console.log("[AI FALLBACK ACTIVADO]: Auditoría generada mediante motor local de contingencia.");
-
-    const sectorText = profileData.sector === "Otro Sector" ? profileData.sector_personalizado : profileData.sector;
-    const ticketText = profileData.precio_promedio ? `$${profileData.precio_promedio} MXN` : "no especificado";
-
-    return {
-      diagnostico_propuesta: `Resumen Estratégico: Análisis táctico para el sector ${sectorText || 'empresarial'} con ticket de ${ticketText}. Su propuesta actual tiene potencial pero requiere mayor claridad en sus ventajas competitivas para destacar frente a la competencia.`,
-      oportunidades: "Puntuación de Presencia Digital: 82/100. Áreas de Oportunidad: Optimización de embudo outbound y seguimiento automatizado. Falta visibilidad en portafolio de casos de éxito.",
-      sugerencias: "Plan de Acción Recomendado: 1) Definir claramente su cliente ideal (ICP). 2) Estructurar una oferta irresistible basada en resultados. 3) Escalar la captación de clientes mediante prospección activa."
-    };
+  } catch (error: any) {
+    console.error("[auditAgencyWithAI] Error en Gemini:", error);
+    // Re-throw so the calling Server Action can refund the credit via increment_credits.
+    throw error;
   }
 }
 

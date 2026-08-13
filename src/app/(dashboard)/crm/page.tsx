@@ -23,15 +23,23 @@ export default async function CRMPage() {
     redirect("/login");
   }
 
-  // 1. Cargar prospectos
-  const { data: prospectsRaw } = await (supabase.from("prospects") as any)
-    .select("*")
-    .eq("user_id", user.id)
-    .order("created_at", { ascending: false });
+  // 1. Load prospects + follow-ups in parallel
+  const [prospectsResult, followUpsResult] = await Promise.all([
+    (supabase.from("prospects") as any)
+      .select("*")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false }),
+    (supabase.from("follow_ups") as any)
+      .select("*")
+      .eq("user_id", user.id)
+      .eq("completado", false)
+      .order("fecha_vencimiento", { ascending: true }),
+  ]);
 
-  const prospects = (prospectsRaw ?? []) as ProspectRow[];
+  const prospects = (prospectsResult.data ?? []) as ProspectRow[];
+  const pendingFollowUps = (followUpsResult.data ?? []) as FollowUpRow[];
 
-  // 2. Cargar auditorías
+  // 2. Load audits for found prospects
   const prospectIds = prospects.map((p) => p.id);
   let auditsMap: Record<string, AuditRow> = {};
 
@@ -53,14 +61,6 @@ export default async function CRMPage() {
     audit: auditsMap[p.id] ?? null,
   }));
 
-  // 3. Cargar seguimientos pendientes y vencidos
-  const { data: followUpsRaw } = await (supabase.from("follow_ups") as any)
-    .select("*")
-    .eq("user_id", user.id)
-    .eq("completado", false)
-    .order("fecha_vencimiento", { ascending: true });
-
-  const pendingFollowUps = (followUpsRaw ?? []) as FollowUpRow[];
 
   // Mapa de prospectos por id
   const prospectsMap = prospects.reduce((acc, p) => {

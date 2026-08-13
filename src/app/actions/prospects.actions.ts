@@ -328,7 +328,8 @@ export async function importProspectToCRM(
     // 3.9 Verificar créditos antes del pipeline IA (optimistic lock)
     const auditCost = calculateAuditCreditCost(Boolean(prospect.sitio_web));
     if (profile && typeof profile.credits_remaining === 'number') {
-      const { data: newBalance, error: rpcError } = await (supabase as any)
+      const serviceClient = createServiceClient();
+      const { data: newBalance, error: rpcError } = await (serviceClient as any)
         .rpc('decrement_credits', { p_user_id: user.id, p_amount: auditCost });
         
       if (rpcError || newBalance === null) {
@@ -376,10 +377,10 @@ export async function importProspectToCRM(
     };
   } catch (err: any) {
     if (appliedCost > 0) {
-      const supabase = await createClient();
-      const { data: { user } } = await supabase.auth.getUser();
+      const serviceClient = createServiceClient();
+      const { data: { user } } = await createClient().then(c => c.auth.getUser());
       if (user) {
-        await (supabase as any).rpc('increment_credits', { p_user_id: user.id, p_amount: appliedCost });
+        await (serviceClient as any).rpc('increment_credits', { p_user_id: user.id, p_amount: appliedCost });
       }
     }
 
@@ -521,7 +522,8 @@ export async function retryAudit(prospectId: string): Promise<ActionResult> {
     // 1.5 Verificar créditos antes del pipeline IA (optimistic lock)
     const auditCost = calculateAuditCreditCost(Boolean(prospect.sitio_web));
     if (profile && typeof profile.credits_remaining === 'number') {
-      const { data: newBalance, error: rpcError } = await (supabase as any)
+      const serviceClient = createServiceClient();
+      const { data: newBalance, error: rpcError } = await (serviceClient as any)
         .rpc('decrement_credits', { p_user_id: user.id, p_amount: auditCost });
         
       if (rpcError || newBalance === null) {
@@ -562,10 +564,10 @@ export async function retryAudit(prospectId: string): Promise<ActionResult> {
     return { success: true };
   } catch (err: any) {
     if (appliedCost > 0) {
-      const supabase = await createClient();
-      const { data: { user } } = await supabase.auth.getUser();
+      const serviceClient = createServiceClient();
+      const { data: { user } } = await createClient().then(c => c.auth.getUser());
       if (user) {
-        await (supabase as any).rpc('increment_credits', { p_user_id: user.id, p_amount: appliedCost });
+        await (serviceClient as any).rpc('increment_credits', { p_user_id: user.id, p_amount: appliedCost });
       }
     }
 
@@ -612,7 +614,8 @@ export async function generateOnDemandProspectMessage(prospectId: string): Promi
     // Bloqueo optimista (1 crédito por generación)
     const cost = 1;
     if (typeof profile.credits_remaining === 'number') {
-      const { data: newBalance, error: rpcError } = await (supabase as any)
+      const serviceClient = createServiceClient();
+      const { data: newBalance, error: rpcError } = await (serviceClient as any)
         .rpc('decrement_credits', { p_user_id: user.id, p_amount: cost });
         
       if (rpcError || newBalance === null) {
@@ -659,10 +662,10 @@ export async function generateOnDemandProspectMessage(prospectId: string): Promi
     return { success: true, messages };
   } catch (err: any) {
     if (appliedCost > 0) {
-      const supabase = await createClient();
-      const { data: { user } } = await supabase.auth.getUser();
+      const serviceClient = createServiceClient();
+      const { data: { user } } = await createClient().then(c => c.auth.getUser());
       if (user) {
-        await (supabase as any).rpc('increment_credits', { p_user_id: user.id, p_amount: appliedCost });
+        await (serviceClient as any).rpc('increment_credits', { p_user_id: user.id, p_amount: appliedCost });
       }
     }
 

@@ -5,7 +5,7 @@
  *
  * Server Actions para gestión del perfil de negocio del usuario.
  */
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { profileFormSchema, type ProfileFormInput, type ActionResult } from "@/types";
 import type { ProfileRow } from "@/types/database.types";
 import { revalidatePath } from "next/cache";
@@ -95,8 +95,9 @@ export async function reAuditProfile(): Promise<ActionResult<ProfileRow>> {
     let diagnostico_ia = null;
     let appliedCost = 0;
     
-    // Optimistic lock
-    const { data: newBalance, error: rpcError } = await (supabase as any)
+    // Optimistic lock via service_role (only backend can call these RPCs)
+    const serviceClient = createServiceClient();
+    const { data: newBalance, error: rpcError } = await (serviceClient as any)
       .rpc('decrement_credits', { p_user_id: user.id, p_amount: 1 });
       
     if (rpcError || newBalance === null) {
@@ -112,7 +113,7 @@ export async function reAuditProfile(): Promise<ActionResult<ProfileRow>> {
       }
     } catch (auditErr: any) {
       if (appliedCost > 0) {
-        await (supabase as any).rpc('increment_credits', { p_user_id: user.id, p_amount: appliedCost });
+        await (serviceClient as any).rpc('increment_credits', { p_user_id: user.id, p_amount: appliedCost });
       }
       console.error("[reAuditProfile] Error en auditoría de agencia:", auditErr);
       

@@ -163,7 +163,22 @@ export async function processSearchDataset(searchId: string, datasetId: string):
   const actualCost = calculateSearchCreditCost(newProspectsCount);
 
   if (actualCost > 0) {
-    await (supabase as any).rpc('decrement_credits', { p_user_id: searchRaw.user_id, p_amount: actualCost });
+    // Using service_role client — authenticated users cannot call this RPC directly.
+    const { data: newBalance, error: rpcError } = await (supabase as any)
+      .rpc('decrement_credits', { p_user_id: searchRaw.user_id, p_amount: actualCost });
+
+    if (rpcError || newBalance === null) {
+      // User ran out of credits while Apify was scraping — abort, do NOT gift leads.
+      console.warn(`[processSearchDataset] INSUFFICIENT_CREDITS para user ${searchRaw.user_id}. Abortando guardado de resultados.`);
+      await (supabase.from("searches") as any)
+        .update({
+          status: "error",
+          error_mensaje: "Créditos insuficientes para procesar los resultados. Tu saldo fue verificado al completar la búsqueda.",
+        })
+        .eq("id", searchId)
+        .eq("user_id", searchRaw.user_id);
+      return 0;
+    }
   }
 
   const originalQuery = (searchRaw.results_json as any)?.originalQuery;
@@ -177,8 +192,6 @@ export async function processSearchDataset(searchId: string, datasetId: string):
     })
     .eq("id", searchId)
     .eq("user_id", searchRaw.user_id);
-
-
 
   if (searchRaw.ubicacion) {
     const cacheKey = normalizeSearchKey(searchRaw.query, searchRaw.ubicacion);
@@ -207,7 +220,7 @@ export async function startGoogleMapsSearch({
   const isLocalhost =
     APP_URL.includes("localhost") || APP_URL.includes("127.0.0.1");
 
-  let url = `${APIFY_BASE_URL}/acts/${encodeURIComponent(ACTOR_ID)}/runs?token=${APIFY_API_TOKEN}`;
+  let url = `${APIFY_BASE_URL}/acts/${encodeURIComponent(ACTOR_ID)}/runs`;
 
   // Solo adjuntar el webhook a Apify si la URL es un dominio público accesible por internet
   if (!isLocalhost) {
@@ -252,7 +265,10 @@ export async function startGoogleMapsSearch({
 
     const response = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${APIFY_API_TOKEN}`,
+      },
       signal: controller.signal,
       body: JSON.stringify(actorInput),
     });
@@ -280,7 +296,8 @@ export async function startGoogleMapsSearch({
             await new Promise((resolve) => setTimeout(resolve, 8000));
 
             const runRes = await fetch(
-              `${APIFY_BASE_URL}/actor-runs/${runId}?token=${APIFY_API_TOKEN}`
+              `${APIFY_BASE_URL}/actor-runs/${runId}`,
+              { headers: { "Authorization": `Bearer ${APIFY_API_TOKEN}` } }
             );
             if (runRes.ok) {
               const runData = await runRes.json();
@@ -344,7 +361,7 @@ export async function startGoogleMapsSearch({
 export async function getDatasetItems(
   datasetId: string
 ): Promise<ApifyPlace[]> {
-  const url = `${APIFY_BASE_URL}/datasets/${datasetId}/items?token=${APIFY_API_TOKEN}&format=json&clean=true`;
+  const url = `${APIFY_BASE_URL}/datasets/${datasetId}/items?format=json&clean=true`;
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 60_000);
@@ -352,6 +369,7 @@ export async function getDatasetItems(
   try {
     const response = await fetch(url, {
       signal: controller.signal,
+      headers: { "Authorization": `Bearer ${APIFY_API_TOKEN}` },
     });
 
     if (!response.ok) {

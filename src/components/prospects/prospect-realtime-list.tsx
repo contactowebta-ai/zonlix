@@ -421,13 +421,13 @@ export function ProspectRealtimeList({ searchId, initialStatus, onStatusChange }
                         <TableCell className="py-2 px-2 align-top text-xs text-muted-foreground">
                           <div className="space-y-0.5 min-w-0">
                             {place.phone ? (
-                              <span className="text-xs text-zinc-200 block font-mono truncate">{place.phone}</span>
+                              <span className="text-xs text-zinc-700 dark:text-zinc-200 block font-mono truncate">{place.phone}</span>
                             ) : (
-                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-zinc-800/80 text-zinc-400 border border-zinc-700/50">
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-zinc-100 dark:bg-zinc-800/80 text-zinc-500 dark:text-zinc-400 border border-zinc-300/50 dark:border-zinc-700/50">
                                 Sin teléfono
                               </span>
                             )}
-                            <p className="text-[11px] text-zinc-400 truncate max-w-[220px]" title={place.address || undefined}>
+                            <p className="text-[11px] text-zinc-500 dark:text-zinc-400 truncate max-w-[220px]" title={place.address || undefined}>
                               {place.address || 'Sin dirección registrada'}
                             </p>
                           </div>
@@ -438,11 +438,11 @@ export function ProspectRealtimeList({ searchId, initialStatus, onStatusChange }
                             <div className="flex items-center gap-1 text-xs text-amber-400 font-medium">
                               <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400 shrink-0" />
                               <span>{place.totalScore || 'N/A'}</span>
-                              {place.reviewsCount ? <span className="text-zinc-500 text-[11px]">({place.reviewsCount})</span> : null}
+                              {place.reviewsCount ? <span className="text-zinc-600 dark:text-zinc-500 text-[11px]">({place.reviewsCount})</span> : null}
                             </div>
                             <button 
                               onClick={() => setPreviewPlace(place)}
-                              className="inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-emerald-400 underline transition-colors"
+                              className="inline-flex items-center gap-1 text-[11px] text-zinc-500 dark:text-zinc-400 hover:text-emerald-500 dark:hover:text-emerald-400 underline transition-colors"
                             >
                               <Eye className="w-3 h-3"/>
                               Vista Previa
@@ -533,7 +533,7 @@ export function ProspectRealtimeList({ searchId, initialStatus, onStatusChange }
           <div className="grid grid-cols-1 gap-3 py-4">
             <div className="flex items-center gap-4 bg-zinc-50/80 dark:bg-zinc-800/30 border border-zinc-200/60 dark:border-zinc-800/50 p-3.5 rounded-xl transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800/50">
               <div className="flex-shrink-0 bg-white dark:bg-zinc-800 p-2.5 rounded-lg border border-zinc-200 dark:border-zinc-700/50 shadow-inner">
-                <MapPin className="w-5 h-5 text-zinc-400" />
+                <MapPin className="w-5 h-5 text-zinc-500 dark:text-zinc-400" />
               </div>
               <div className="flex flex-col min-w-0 flex-1">
                 <span className="text-xs text-zinc-500 dark:text-zinc-400 font-semibold uppercase tracking-wider">Dirección</span>
@@ -543,7 +543,7 @@ export function ProspectRealtimeList({ searchId, initialStatus, onStatusChange }
             
             <div className="flex items-center gap-4 bg-zinc-50/80 dark:bg-zinc-800/30 border border-zinc-200/60 dark:border-zinc-800/50 p-3.5 rounded-xl transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800/50">
               <div className="flex-shrink-0 bg-white dark:bg-zinc-800 p-2.5 rounded-lg border border-zinc-200 dark:border-zinc-700/50 shadow-inner">
-                <Phone className="w-5 h-5 text-zinc-400" />
+                <Phone className="w-5 h-5 text-zinc-500 dark:text-zinc-400" />
               </div>
               <div className="flex flex-col min-w-0 flex-1">
                 <span className="text-xs text-zinc-500 dark:text-zinc-400 font-semibold uppercase tracking-wider">Teléfono</span>
@@ -553,7 +553,7 @@ export function ProspectRealtimeList({ searchId, initialStatus, onStatusChange }
 
             <div className="flex items-center gap-4 bg-zinc-50/80 dark:bg-zinc-800/30 border border-zinc-200/60 dark:border-zinc-800/50 p-3.5 rounded-xl transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800/50">
               <div className="flex-shrink-0 bg-white dark:bg-zinc-800 p-2.5 rounded-lg border border-zinc-200 dark:border-zinc-700/50 shadow-inner">
-                <Globe className="w-5 h-5 text-zinc-400" />
+                <Globe className="w-5 h-5 text-zinc-500 dark:text-zinc-400" />
               </div>
               <div className="flex flex-col min-w-0 flex-1">
                 <span className="text-xs text-zinc-500 dark:text-zinc-400 font-semibold uppercase tracking-wider">Sitio Web</span>
@@ -574,14 +574,14 @@ export function ProspectRealtimeList({ searchId, initialStatus, onStatusChange }
                     <ExternalLink className="w-3.5 h-3.5 flex-shrink-0" />
                   </a>
                 ) : (
-                  <span className="text-sm text-zinc-500 italic mt-0.5">No disponible</span>
+                  <span className="text-sm text-zinc-500 dark:text-zinc-500 italic mt-0.5">No disponible</span>
                 )}
               </div>
             </div>
 
             <div className="flex items-center gap-4 bg-zinc-50/80 dark:bg-zinc-800/30 border border-zinc-200/60 dark:border-zinc-800/50 p-3.5 rounded-xl transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800/50">
               <div className="flex-shrink-0 bg-white dark:bg-zinc-800 p-2.5 rounded-lg border border-zinc-200 dark:border-zinc-700/50 shadow-inner">
-                <ExternalLink className="w-5 h-5 text-zinc-400" />
+                <ExternalLink className="w-5 h-5 text-zinc-500 dark:text-zinc-400" />
               </div>
               <div className="flex flex-col min-w-0 flex-1">
                 <span className="text-xs text-zinc-500 dark:text-zinc-400 font-semibold uppercase tracking-wider">Google Maps</span>
@@ -590,7 +590,7 @@ export function ProspectRealtimeList({ searchId, initialStatus, onStatusChange }
                     Ver perfil completo en Google Maps
                   </a>
                 ) : (
-                  <span className="text-sm text-zinc-500 italic mt-0.5">URL no disponible</span>
+                  <span className="text-sm text-zinc-500 dark:text-zinc-500 italic mt-0.5">URL no disponible</span>
                 )}
               </div>
             </div>
