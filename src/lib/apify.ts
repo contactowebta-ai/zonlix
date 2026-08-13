@@ -118,20 +118,34 @@ export async function processSearchDataset(searchId: string, datasetId: string):
 
   if (!prospects || prospects.length === 0) {
     console.log("[SEARCH WARNING]: 0 prospectos encontrados. Activando generador Mock de contingencia...");
-    const mockPlaces = generateMockProspects(searchRaw.query, searchRaw.ubicacion, 6);
-    prospects = mockPlaces.map((item: any) => ({
-      placeId: item.placeId || item.cid || String(Math.random()),
-      title: sanitizeCompanyName(item.title || item.name || "Sin nombre"),
-      categoryName: item.categoryName || searchRaw.query || "",
-      address: item.address || "",
-      city: searchRaw.ubicacion || "",
-      phone: item.phone || "",
-      website: item.website || null,
-      totalScore: item.totalScore || 0,
-      reviewsCount: item.reviewsCount || 0,
-      url: item.url || "",
-      location: item.location || null,
-    }));
+    try {
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error("Fallo en Apify: No se generaron prospectos.");
+      }
+      const mockPlaces = generateMockProspects(searchRaw.query, searchRaw.ubicacion, 6);
+      prospects = mockPlaces.map((item: any) => ({
+        placeId: item.placeId || item.cid || String(Math.random()),
+        title: sanitizeCompanyName(item.title || item.name || "Sin nombre"),
+        categoryName: item.categoryName || searchRaw.query || "",
+        address: item.address || "",
+        city: searchRaw.ubicacion || "",
+        phone: item.phone || "",
+        website: item.website || null,
+        totalScore: item.totalScore || 0,
+        reviewsCount: item.reviewsCount || 0,
+        url: item.url || "",
+        location: item.location || null,
+      }));
+    } catch (e: any) {
+      await (supabase.from("searches") as any)
+        .update({
+          status: "error",
+          error_mensaje: e.message,
+        })
+        .eq("id", searchId)
+        .eq("user_id", searchRaw.user_id);
+      throw e;
+    }
   }
 
   // Buscar searches previas para extraer placeIds históricos y deduplicar GLOBALMENTE
@@ -224,12 +238,13 @@ export async function startGoogleMapsSearch({
 
   // Solo adjuntar el webhook a Apify si la URL es un dominio público accesible por internet
   if (!isLocalhost) {
-    const webhookUrl = `${APP_URL}/api/webhooks/apify?secret=${WEBHOOK_SECRET}&searchId=${searchId}`;
+    const webhookUrl = `${APP_URL}/api/webhooks/apify?searchId=${searchId}`;
 
     const webhookDefinition = [
       {
         eventTypes: ["ACTOR.RUN.SUCCEEDED"],
         requestUrl: webhookUrl,
+        headersTemplate: `{\n  "Authorization": "Bearer ${WEBHOOK_SECRET}"\n}`
       },
     ];
 

@@ -26,9 +26,10 @@ import type { SearchRow } from "@/types/database.types";
 
 export async function POST(request: NextRequest) {
   try {
-    // 1. Verificar secreto en query param
+    // 1. Verificar secreto en header
     const { searchParams } = request.nextUrl;
-    const incomingSecret = searchParams.get("secret");
+    const authHeader = request.headers.get("authorization");
+    const incomingSecret = authHeader?.split("Bearer ")[1];
     const expectedSecret = process.env.APIFY_WEBHOOK_SECRET;
 
     if (!expectedSecret || incomingSecret !== expectedSecret) {
@@ -69,10 +70,29 @@ export async function POST(request: NextRequest) {
       body.runId
     ) as string | undefined;
 
+    if (runId) {
+      const supabase = createServiceClient();
+      const { data: searchStatusRow, error: statusErr } = await (supabase.from("searches") as any)
+        .select("status")
+        .eq("apify_run_id", runId)
+        .single();
+        
+      if (!statusErr && searchStatusRow) {
+        if (searchStatusRow.status === "completado" || searchStatusRow.status === "error") {
+          console.log(`[Apify Webhook] Ignorando webhook repetido para runId ${runId} (status: ${searchStatusRow.status})`);
+          return new Response('Already processed', { status: 200 });
+        }
+      }
+    }
+
     if ((!datasetId || datasetId.includes("{{")) && runId && !runId.includes("{{")) {
       console.log(`[Apify Webhook] Fallback: Consultando API de Apify directamente para el run ${runId}...`);
       const runRes = await fetch(
-        `https://api.apify.com/v2/actor-runs/${runId}?token=${process.env.APIFY_API_TOKEN}`
+        `https://api.apify.com/v2/actor-runs/${runId}`, {
+          headers: {
+            "Authorization": `Bearer ${process.env.APIFY_API_TOKEN}`
+          }
+        }
       );
       if (runRes.ok) {
         const runData = await runRes.json();

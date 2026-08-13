@@ -25,6 +25,7 @@ import { revalidatePath } from "next/cache";
 import { interpretSearchInput } from "@/lib/gemini";
 import type { ApifyPlace } from "@/types/schemas";
 import type { SearchRow, ProspectRow } from "@/types/database.types";
+import { Redis } from "@upstash/redis";
 
 const calculateSearchCreditCost = (limit: number): number => {
   if (limit <= 0) return 0;
@@ -97,6 +98,27 @@ export async function POST(request: NextRequest) {
 
     if (authError || !user) {
       return Response.json({ error: "No autorizado" }, { status: 401 });
+    }
+
+    // RATE LIMITING MÁXIMO 5 POR MINUTO
+    try {
+      const redis = Redis.fromEnv();
+      const now = new Date();
+      const windowKey = `ratelimit_searches_${user.id}_${now.getFullYear()}${now.getMonth()}${now.getDate()}${now.getHours()}${now.getMinutes()}`;
+      const requestsCount = await redis.incr(windowKey);
+      
+      if (requestsCount === 1) {
+        await redis.expire(windowKey, 60);
+      }
+      
+      if (requestsCount > 5) {
+        return Response.json(
+          { error: "TOO_MANY_REQUESTS", message: "Has excedido el límite de 5 búsquedas por minuto. Por favor, espera un momento." },
+          { status: 429 }
+        );
+      }
+    } catch (e) {
+      console.warn("[Rate Limit Error]", e);
     }
 
     // 1.5 Validar créditos del usuario
