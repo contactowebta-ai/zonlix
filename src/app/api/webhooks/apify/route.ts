@@ -50,10 +50,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Extraer searchId de los query params o el body
-    const searchId =
-      (searchParams.get("searchId") || body.searchId || body.eventData?.searchId) as string | undefined;
-
     // Extraer datasetId
     let datasetId = (
       body.resource?.defaultDatasetId ||
@@ -62,7 +58,7 @@ export async function POST(request: NextRequest) {
       body.defaultDatasetId
     ) as string | undefined;
 
-    // Fallback de seguridad: si datasetId es undefined o incluye '{{', hacer fetch a la API de Apify usando actorRunId
+    // Extraer runId (Única fuente de verdad para identificar la búsqueda)
     const runId = (
       body.eventData?.actorRunId ||
       body.resource?.id ||
@@ -70,20 +66,28 @@ export async function POST(request: NextRequest) {
       body.runId
     ) as string | undefined;
 
-    if (runId) {
-      const supabase = createServiceClient();
-      const { data: searchStatusRow, error: statusErr } = await (supabase.from("searches") as any)
-        .select("status")
-        .eq("apify_run_id", runId)
-        .single();
-        
-      if (!statusErr && searchStatusRow) {
-        if (searchStatusRow.status === "completado" || searchStatusRow.status === "error") {
-          console.log(`[Apify Webhook] Ignorando webhook repetido para runId ${runId} (status: ${searchStatusRow.status})`);
-          return new Response('Already processed', { status: 200 });
-        }
-      }
+    if (!runId) {
+      console.error("[Apify Webhook] Error: runId no encontrado en el payload");
+      return Response.json({ error: "runId requerido" }, { status: 400 });
     }
+
+    const supabase = createServiceClient();
+    const { data: searchRow, error: searchErr } = await (supabase.from("searches") as any)
+      .select("id, status")
+      .eq("apify_run_id", runId)
+      .single();
+
+    if (searchErr || !searchRow) {
+      console.error(`[Apify Webhook] Error: Búsqueda no encontrada para apify_run_id ${runId}`);
+      return Response.json({ error: "RunId desconocido" }, { status: 404 });
+    }
+
+    if (searchRow.status === "completado" || searchRow.status === "error") {
+      console.log(`[Apify Webhook] Ignorando webhook repetido para runId ${runId} (status: ${searchRow.status})`);
+      return new Response('Already processed', { status: 200 });
+    }
+
+    const searchId = searchRow.id;
 
     if ((!datasetId || datasetId.includes("{{")) && runId && !runId.includes("{{")) {
       console.log(`[Apify Webhook] Fallback: Consultando API de Apify directamente para el run ${runId}...`);
@@ -98,11 +102,6 @@ export async function POST(request: NextRequest) {
         const runData = await runRes.json();
         datasetId = runData.data?.defaultDatasetId;
       }
-    }
-
-    if (!searchId) {
-      console.error("[Apify Webhook] Error: searchId no encontrado ni en query params ni en body");
-      return Response.json({ error: "searchId requerido" }, { status: 400 });
     }
 
     if (!datasetId || datasetId.includes("{{")) {

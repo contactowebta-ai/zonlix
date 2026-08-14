@@ -118,7 +118,11 @@ export async function POST(request: NextRequest) {
         );
       }
     } catch (e) {
-      console.warn("[Rate Limit Error]", e);
+      console.error("[Rate Limit Error]", e);
+      return Response.json(
+        { error: "RATE_LIMIT_UNAVAILABLE", message: "El servicio de validación de cuotas no está disponible. Intenta de nuevo en unos minutos." },
+        { status: 503 }
+      );
     }
 
     // 1.5 Validar créditos del usuario

@@ -238,7 +238,7 @@ export async function startGoogleMapsSearch({
 
   // Solo adjuntar el webhook a Apify si la URL es un dominio público accesible por internet
   if (!isLocalhost) {
-    const webhookUrl = `${APP_URL}/api/webhooks/apify?searchId=${searchId}`;
+    const webhookUrl = `${APP_URL}/api/webhooks/apify`;
 
     const webhookDefinition = [
       {
