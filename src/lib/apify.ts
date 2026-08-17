@@ -198,18 +198,54 @@ export async function processSearchDataset(searchId: string, datasetId: string):
   const originalQuery = (searchRaw.results_json as any)?.originalQuery;
   const originalLocation = (searchRaw.results_json as any)?.originalLocation;
 
-  await (supabase.from("searches") as any)
-    .update({
-      status: "completado",
-      total_resultados: prospects.length,
-      results_json: { data: prospects, _limit: originalLimit, originalQuery, originalLocation },
-    })
-    .eq("id", searchId)
-    .eq("user_id", searchRaw.user_id);
+  // FIX P0 — REFUND TRANSACCIONAL
+  // Si el guardado en BD o la escritura a caché falla DESPUÉS de haber
+  // decrementado créditos, devolvemos el dinero atómicamente antes de
+  // propagar el error. El usuario nunca pierde créditos sin recibir datos.
+  try {
+    await (supabase.from("searches") as any)
+      .update({
+        status: "completado",
+        total_resultados: prospects.length,
+        results_json: { data: prospects, _limit: originalLimit, originalQuery, originalLocation },
+      })
+      .eq("id", searchId)
+      .eq("user_id", searchRaw.user_id);
 
-  if (searchRaw.ubicacion) {
-    const cacheKey = normalizeSearchKey(searchRaw.query, searchRaw.ubicacion);
-    await setCachedSearch(cacheKey, places);
+    if (searchRaw.ubicacion) {
+      const cacheKey = normalizeSearchKey(searchRaw.query, searchRaw.ubicacion);
+      await setCachedSearch(cacheKey, places);
+    }
+  } catch (saveError: any) {
+    console.error("[processSearchDataset] Error guardando resultados en BD:", saveError);
+
+    // Refund atómico — solo si se habían descontado créditos
+    if (actualCost > 0) {
+      try {
+        await (supabase as any).rpc('increment_credits', {
+          p_user_id: searchRaw.user_id,
+          p_amount: actualCost,
+        });
+        console.warn(`[processSearchDataset] REFUND ejecutado: ${actualCost} crédito(s) devueltos al usuario ${searchRaw.user_id}.`);
+      } catch (refundError: any) {
+        // El refund falló: escalar a soporte (log crítico)
+        console.error(
+          `[processSearchDataset] CRITICAL: Refund fallido para user ${searchRaw.user_id}, amount ${actualCost}. Requiere intervención manual.`,
+          refundError
+        );
+      }
+    }
+
+    // Marcar la búsqueda como error para que el frontend se entere
+    await (supabase.from("searches") as any)
+      .update({
+        status: "error",
+        error_mensaje: "Error interno al guardar resultados. Tus créditos han sido devueltos.",
+      })
+      .eq("id", searchId)
+      .eq("user_id", searchRaw.user_id);
+
+    throw saveError;
   }
 
   console.log(`[SEARCH OK]: Prospectos procesados correctamente. Nuevos: ${newProspectsCount}, Total devueltos: ${prospects.length}`);

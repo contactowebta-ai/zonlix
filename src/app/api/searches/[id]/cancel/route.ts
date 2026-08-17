@@ -1,4 +1,4 @@
-﻿/**
+/**
  * POST /api/searches/[id]/cancel
  *
  * Cancela una busqueda en progreso:
@@ -64,9 +64,10 @@ export async function POST(
 
     if (runId && runId !== "mock") {
       try {
-        const abortUrl = `${APIFY_BASE_URL}/actor-runs/${runId}/abort?token=${APIFY_API_TOKEN}`;
+        const abortUrl = `${APIFY_BASE_URL}/actor-runs/${runId}/abort`;
         const abortRes = await fetch(abortUrl, {
           method: "POST",
+          headers: { "Authorization": `Bearer ${APIFY_API_TOKEN}` },
           signal: AbortSignal.timeout(8_000),
         });
         if (abortRes.ok) {

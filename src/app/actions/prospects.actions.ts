@@ -90,8 +90,11 @@ export async function checkSearchFallback(searchId: string): Promise<ActionResul
     // 2. Consultar el estado del run directamente en la API de Apify
     const APIFY_TOKEN = process.env.APIFY_API_TOKEN;
     const runRes = await fetch(
-      `https://api.apify.com/v2/actor-runs/${runId}?token=${APIFY_TOKEN}`,
-      { cache: "no-store" }
+      `https://api.apify.com/v2/actor-runs/${runId}`,
+      {
+        cache: "no-store",
+        headers: { "Authorization": `Bearer ${APIFY_TOKEN}` },
+      }
     );
 
     if (!runRes.ok) {
@@ -266,6 +269,10 @@ export async function importProspectToCRM(
       .single();
 
     const profile = profileRaw as ProfileRow | null;
+
+    if (!profile || typeof profile.credits_remaining !== 'number') { 
+      return { success: false, error: "No se pudo verificar el saldo de créditos. Intenta de nuevo." }; 
+    }
 
     const resolvedTitle = String(place.title || place.name || "Sin nombre");
 
@@ -518,6 +525,10 @@ export async function retryAudit(prospectId: string): Promise<ActionResult> {
       .eq("id", user.id)
       .single();
     const profile = profileRaw as ProfileRow | null;
+
+    if (!profile || typeof profile.credits_remaining !== 'number') { 
+      return { success: false, error: "No se pudo verificar el saldo de créditos. Intenta de nuevo." }; 
+    }
 
     // 1.5 Verificar créditos antes del pipeline IA (optimistic lock)
     const auditCost = calculateAuditCreditCost(Boolean(prospect.sitio_web));

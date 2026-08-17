@@ -16,7 +16,7 @@
  * Lista las búsquedas del usuario autenticado.
  */
 import { type NextRequest } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { createSearchSchema } from "@/types/schemas";
 import { normalizeSearchKey, getCachedSearch } from "@/lib/redis-cache";
 import { startGoogleMapsSearch } from "@/lib/apify";
@@ -26,11 +26,7 @@ import { interpretSearchInput } from "@/lib/gemini";
 import type { ApifyPlace } from "@/types/schemas";
 import type { SearchRow, ProspectRow } from "@/types/database.types";
 import { Redis } from "@upstash/redis";
-
-const calculateSearchCreditCost = (limit: number): number => {
-  if (limit <= 0) return 0;
-  return Math.ceil(limit / 5);
-};
+import { calculateSearchCreditCost } from "@/lib/credits";
 
 // ============================================
 // GET — lista de búsquedas del usuario
@@ -125,7 +121,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 1.5 Validar créditos del usuario
+    // 1.5 Obtener saldo del usuario (se re-verifica con maxCost tras parsear el body)
     const { data: profile, error: profileError } = await (supabase.from("profiles") as any)
       .select("credits_remaining")
       .eq("id", user.id)
@@ -133,13 +129,6 @@ export async function POST(request: NextRequest) {
 
     if (profileError || !profile) {
       return Response.json({ error: "No se pudo obtener el perfil del usuario" }, { status: 500 });
-    }
-
-    if (profile.credits_remaining <= 0) {
-      return Response.json(
-        { error: "INSUFFICIENT_CREDITS", message: "Has consumido tus créditos. Espera a tu fecha de renovación o contacta a soporte para un upgrade." },
-        { status: 403 }
-      );
     }
 
     // 2. Validar body
@@ -154,6 +143,21 @@ export async function POST(request: NextRequest) {
     }
 
     const { query, ubicacion, limit = 20 } = parseResult.data;
+
+    // 2.5 RESERVA FINANCIERA (Hold) — FIX P0
+    // Calculamos el coste máximo posible ANTES de disparar el scraper.
+    // Si el saldo no cubre la operación completa, la rechazamos aquí.
+    // Esto previene el DoS económico: gastar recursos de Apify sin poder cobrar.
+    const maxCost = calculateSearchCreditCost(limit);
+    if (profile.credits_remaining < maxCost) {
+      return Response.json(
+        {
+          error: "INSUFFICIENT_CREDITS",
+          message: `Necesitas al menos ${maxCost} crédito(s) para esta búsqueda (límite: ${limit} resultados). Tu saldo actual: ${profile.credits_remaining}.`,
+        },
+        { status: 402 }
+      );
+    }
 
     // BLOQUEO DE PROMPT INJECTION / XSS (PRE-BÚSQUEDA)
     const isSuspicious = (text: string) => /ignora|instrucciones|system prompt|override|<script>|select|drop table|<|>/i.test(text);
@@ -259,7 +263,8 @@ export async function POST(request: NextRequest) {
       const deliveredCount = cachedPlaces.length;
       const actualCost = calculateSearchCreditCost(deliveredCount);
       if (actualCost > 0) {
-        const { data: newBalance, error: rpcError } = await (supabase as any)
+        const serviceClient = createServiceClient();
+        const { data: newBalance, error: rpcError } = await (serviceClient as any)
           .rpc('decrement_credits', { p_user_id: user.id, p_amount: actualCost });
           
         if (rpcError || newBalance === null) {
