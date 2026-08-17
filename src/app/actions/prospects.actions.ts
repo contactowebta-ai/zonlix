@@ -157,7 +157,7 @@ export async function checkSearchFallback(searchId: string): Promise<ActionResul
     return { success: true, data: { status: "completado", count } };
   } catch (err) {
     console.error("[checkSearchFallback] Error:", err);
-    return { success: false, error: err instanceof Error ? err.message : "Error inesperado" };
+    return { success: false, error: "Ocurrió un error inesperado al verificar el estado de la búsqueda. Intenta de nuevo." };
   }
 }
 
@@ -188,7 +188,8 @@ export async function updateProspectStatus(
       .eq("user_id", user.id);
 
     if (error) {
-      return { success: false, error: error.message };
+      console.error("[updateProspectStatus] Supabase error:", error);
+      return { success: false, error: "No se pudo actualizar el estado del prospecto." };
     }
 
     revalidatePath("/prospectos");
@@ -197,9 +198,10 @@ export async function updateProspectStatus(
 
     return { success: true };
   } catch (err) {
+    console.error("[updateProspectStatus] Error:", err);
     return {
       success: false,
-      error: err instanceof Error ? err.message : "Error al actualizar estado",
+      error: "Ocurrió un error al actualizar el estado. Intenta de nuevo.",
     };
   }
 }
@@ -233,15 +235,17 @@ export async function updateMessageContent(
       .eq("user_id", user.id);
 
     if (error) {
-      return { success: false, error: error.message };
+      console.error("[updateMessageContent] Supabase error:", error);
+      return { success: false, error: "No se pudo guardar el mensaje." };
     }
 
     revalidatePath("/prospectos");
     return { success: true };
   } catch (err) {
+    console.error("[updateMessageContent] Error:", err);
     return {
       success: false,
-      error: err instanceof Error ? err.message : "Error al guardar el mensaje",
+      error: "Ocurrió un error al guardar el mensaje. Intenta de nuevo.",
     };
   }
 }
@@ -394,9 +398,10 @@ export async function importProspectToCRM(
     if (err?.message?.includes("429") || err?.message?.includes("quota") || err?.message?.includes("rate limit")) {
       return { success: false, error: "Has alcanzado el límite de consultas por minuto. Espera 1 minuto y haz clic en 'Reintentar Auditoría'." };
     }
+    console.error("[importProspectToCRM] Error:", err);
     return {
       success: false,
-      error: err instanceof Error ? err.message : "Error al importar prospecto",
+      error: "Ocurrió un error al importar el prospecto. Tus créditos han sido devueltos si fueron descontados.",
     };
   }
 }
@@ -453,9 +458,10 @@ export async function refetchSocialMedia(
     if (err?.message?.includes("429") || err?.message?.includes("quota") || err?.message?.includes("rate limit")) {
       return { success: false, error: "Has alcanzado el límite de consultas por minuto. Espera 1 minuto y haz clic en 'Reintentar Auditoría'." };
     }
+    console.error("[refetchSocialMedia] Error:", err);
     return {
       success: false,
-      error: err instanceof Error ? err.message : "Error al buscar redes sociales",
+      error: "Ocurrió un error al buscar redes sociales. Intenta de nuevo.",
     };
   }
 }
@@ -482,7 +488,8 @@ export async function updateSocialMediaUrls(
       .eq("user_id", user.id);
 
     if (error) {
-      return { success: false, error: error.message };
+      console.error("[updateSocialMediaUrls] Supabase error:", error);
+      return { success: false, error: "No se pudieron guardar las redes sociales." };
     }
 
     revalidatePath(`/prospectos/${prospectId}`);
@@ -491,9 +498,10 @@ export async function updateSocialMediaUrls(
 
     return { success: true };
   } catch (err: any) {
+    console.error("[updateSocialMediaUrls] Error:", err);
     return {
       success: false,
-      error: err instanceof Error ? err.message : "Error al guardar redes sociales",
+      error: "Ocurrió un error al guardar las redes sociales. Intenta de nuevo.",
     };
   }
 }
@@ -585,9 +593,10 @@ export async function retryAudit(prospectId: string): Promise<ActionResult> {
     if (err?.message?.includes("429") || err?.message?.includes("quota") || err?.message?.includes("rate limit")) {
       return { success: false, error: "Has alcanzado el límite de consultas por minuto. Espera 1 minuto y haz clic en 'Reintentar Auditoría'." };
     }
+    console.error("[retryAudit] Error:", err);
     return {
       success: false,
-      error: err instanceof Error ? err.message : "Error al reintentar auditoría",
+      error: "Ocurrió un error al reintentar la auditoría. Tus créditos han sido devueltos si fueron descontados.",
     };
   }
 }

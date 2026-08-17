@@ -58,7 +58,7 @@ export async function updateProfile(
 
     if (error) {
       console.error("[updateProfile] Error Supabase:", error);
-      return { success: false, error: error.message };
+      return { success: false, error: "No se pudo guardar el perfil. Intenta de nuevo." };
     }
 
     revalidatePath("/onboarding");
@@ -69,7 +69,7 @@ export async function updateProfile(
     console.error("[updateProfile] Error inesperado:", err);
     return {
       success: false,
-      error: err instanceof Error ? err.message : "Error inesperado al guardar perfil",
+      error: "Ocurrió un error inesperado al guardar el perfil. Intenta de nuevo.",
     };
   }
 }
@@ -135,7 +135,8 @@ export async function reAuditProfile(): Promise<ActionResult<ProfileRow>> {
       .single();
 
     if (error) {
-      return { success: false, error: error.message };
+      console.error("[reAuditProfile] Supabase update error:", error);
+      return { success: false, error: "No se pudo guardar el diagnóstico. Intenta de nuevo." };
     }
 
     revalidatePath("/onboarding");
@@ -146,7 +147,7 @@ export async function reAuditProfile(): Promise<ActionResult<ProfileRow>> {
     console.error("[reAuditProfile] Error inesperado:", err);
     return {
       success: false,
-      error: err instanceof Error ? err.message : "Error inesperado al re-auditar perfil",
+      error: "Ocurrió un error inesperado al re-auditar el perfil. Intenta de nuevo.",
     };
   }
 }

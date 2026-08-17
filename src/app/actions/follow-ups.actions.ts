@@ -38,7 +38,8 @@ export async function crearSeguimiento(
     });
 
     if (error) {
-      return { success: false, error: error.message };
+      console.error("[crearSeguimiento] Supabase error:", error);
+      return { success: false, error: "No se pudo agendar el seguimiento. Intenta de nuevo." };
     }
 
     revalidatePath(`/prospectos/${prospectId}`);
@@ -46,9 +47,10 @@ export async function crearSeguimiento(
 
     return { success: true };
   } catch (err) {
+    console.error("[crearSeguimiento] Error:", err);
     return {
       success: false,
-      error: err instanceof Error ? err.message : "Error al agendar seguimiento",
+      error: "Ocurrió un error al agendar el seguimiento. Intenta de nuevo.",
     };
   }
 }
@@ -73,16 +75,18 @@ export async function completarSeguimiento(
       .eq("user_id", user.id);
 
     if (error) {
-      return { success: false, error: error.message };
+      console.error("[completarSeguimiento] Supabase error:", error);
+      return { success: false, error: "No se pudo completar el seguimiento. Intenta de nuevo." };
     }
 
     revalidatePath("/crm");
     revalidatePath("/prospectos");
     return { success: true };
   } catch (err) {
+    console.error("[completarSeguimiento] Error:", err);
     return {
       success: false,
-      error: err instanceof Error ? err.message : "Error al completar seguimiento",
+      error: "Ocurrió un error al completar el seguimiento. Intenta de nuevo.",
     };
   }
 }

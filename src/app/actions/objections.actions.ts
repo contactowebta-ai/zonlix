@@ -98,7 +98,7 @@ export async function generateObjectionOptions(
     console.error("[generateObjectionOptions] Error:", err);
     return {
       success: false,
-      error: err instanceof Error ? err.message : "Error al generar respuestas con IA",
+      error: "Ocurrió un error al generar respuestas con IA. Intenta de nuevo.",
     };
   }
 }

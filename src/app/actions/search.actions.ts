@@ -24,7 +24,7 @@ export async function deleteSearchHistoryItem(searchId: string) {
 
     return { success: true };
   } catch (error: any) {
-    console.error('[deleteSearchHistoryItem] Error:', error.message);
-    return { success: false, error: error.message };
+    console.error('[deleteSearchHistoryItem] Error:', error);
+    return { success: false, error: 'No se pudo eliminar el elemento del historial. Intenta de nuevo.' };
   }
 }
