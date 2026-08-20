@@ -332,10 +332,24 @@ export async function POST(request: NextRequest) {
       });
       runId = apifyRes.runId;
       datasetId = apifyRes.datasetId;
+
+      // Guardar run y dataset IDs + credits_held para el webhook
+      const { error: updateErr } = await (supabase.from("searches") as any)
+        .update({
+          status: "procesando",
+          apify_run_id: runId,
+          apify_dataset_id: datasetId,
+          credits_held: maxCost,
+        })
+        .eq("id", searchId)
+        .eq("user_id", user.id);
+
+      if (updateErr) throw new Error("Fallo al actualizar la búsqueda con el ID de Apify.");
+
     } catch (apifyError: any) {
       console.error("[APIFY ERROR]", apifyError);
 
-      // Reembolso inmediato del hold si Apify falló al iniciar
+      // Reembolso inmediato del hold si Apify falló al iniciar o si falló el update de BD
       if (holdApplied) {
         await (serviceClient as any)
           .rpc('increment_credits', { p_user_id: user.id, p_amount: maxCost });
@@ -345,27 +359,16 @@ export async function POST(request: NextRequest) {
       await (supabase.from("searches") as any)
         .update({
           status: "error",
-          error_mensaje: "Los motores de búsqueda están experimentando una alta demanda temporal.",
+          error_mensaje: "Hubo un problema de conexión o actualización. No se descontaron créditos de tu cuenta.",
         })
         .eq("id", searchId)
         .eq("user_id", user.id);
 
       return Response.json({ 
-        error: "APIFY_QUOTA_EXCEEDED", 
-        message: "Los motores de búsqueda están experimentando una alta demanda temporal. No se descontaron créditos de tu cuenta. Por favor reintenta en un par de minutos." 
-      }, { status: 503 });
+        error: "START_SEARCH_ERROR", 
+        message: "Hubo un problema al iniciar la búsqueda. No se descontaron créditos de tu cuenta. Por favor reintenta en un par de minutos." 
+      }, { status: 500 });
     }
-
-    // Guardar run y dataset IDs + credits_held para el webhook
-    await (supabase.from("searches") as any)
-      .update({
-        status: "procesando",
-        apify_run_id: runId,
-        apify_dataset_id: datasetId,
-        credits_held: maxCost,
-      })
-      .eq("id", searchId)
-      .eq("user_id", user.id);
 
     return Response.json({
       status: "procesando",

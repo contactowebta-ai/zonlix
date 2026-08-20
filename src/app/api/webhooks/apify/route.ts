@@ -80,7 +80,7 @@ export async function POST(request: NextRequest) {
     const { data: claimedRows, error: claimErr } = await (supabase.from("searches") as any)
       .update({ processing_started_at: new Date().toISOString(), status: "procesando" })
       .eq("apify_run_id", runId)
-      .is("processing_started_at", null)
+      .or(`processing_started_at.is.null,processing_started_at.lt.${new Date(Date.now() - 10 * 60000).toISOString()}`)
       .select("id, credits_held")
       .limit(1);
 

@@ -124,6 +124,14 @@ export async function processSearchDataset(
     console.log("[SEARCH WARNING]: 0 prospectos encontrados. Activando generador Mock de contingencia...");
     try {
       if (process.env.NODE_ENV === 'production') {
+        if (creditsHeld > 0) {
+          const { error: refundErr } = await (supabase as any).rpc('increment_credits', { p_user_id: searchRaw.user_id, p_amount: creditsHeld });
+          if (refundErr) {
+            console.error(`[processSearchDataset] CRITICAL REFUND FAILED for user ${searchRaw.user_id}, amount ${creditsHeld}`, refundErr);
+          } else {
+            console.log(`[processSearchDataset] Reembolsado ${creditsHeld} créditos por 0 prospectos en Apify.`);
+          }
+        }
         throw new Error("Fallo en Apify: No se generaron prospectos.");
       }
       const mockPlaces = generateMockProspects(searchRaw.query, searchRaw.ubicacion, 6);

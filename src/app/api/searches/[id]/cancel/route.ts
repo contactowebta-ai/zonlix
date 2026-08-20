@@ -12,7 +12,7 @@
  * ese webhook nunca se dispara, creditos intactos.
  */
 import { type NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 
 const APIFY_BASE_URL = "https://api.apify.com/v2";
 const APIFY_API_TOKEN = process.env.APIFY_API_TOKEN!;
@@ -41,7 +41,7 @@ export async function POST(
     const { data: searchRow, error: fetchError } = await (
       supabase.from("searches") as any
     )
-      .select("id, user_id, status, apify_run_id")
+      .select("id, user_id, status, apify_run_id, credits_held")
       .eq("id", searchId)
       .eq("user_id", user.id)
       .single();
@@ -79,6 +79,19 @@ export async function POST(
       } catch (apifyErr) {
         console.warn(`[CANCEL] Error contactando Apify run ${runId}:`, apifyErr);
       }
+    }
+
+    const creditsHeld = searchRow.credits_held ?? 0;
+    if (creditsHeld > 0) {
+      const serviceClient = createServiceClient();
+      const { error: refundErr } = await (serviceClient as any)
+        .rpc("increment_credits", { p_user_id: user.id, p_amount: creditsHeld });
+      
+      if (refundErr) {
+        console.error(`[CANCEL] Error crítico al reembolsar créditos:`, refundErr);
+        throw new Error(`Refund fallido: ${refundErr.message}`);
+      }
+      console.log(`[CANCEL] Reembolso exitoso: ${creditsHeld} créditos al usuario ${user.id}`);
     }
 
     const { error: updateError } = await (supabase.from("searches") as any)
