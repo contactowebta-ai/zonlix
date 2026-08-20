@@ -73,7 +73,11 @@ export function generateMockProspects(query: string, location: string, count: nu
 // PROCESS RESULTS (Local & Webhook shared)
 // ============================================
 
-export async function processSearchDataset(searchId: string, datasetId: string): Promise<number> {
+export async function processSearchDataset(
+  searchId: string,
+  datasetId: string,
+  creditsHeld: number = 0
+): Promise<number> {
   const supabase = createServiceClient();
 
   const { data: searchRaw, error: searchError } = await (supabase.from("searches") as any)
@@ -176,13 +180,42 @@ export async function processSearchDataset(searchId: string, datasetId: string):
 
   const actualCost = calculateSearchCreditCost(newProspectsCount);
 
-  if (actualCost > 0) {
-    // Using service_role client — authenticated users cannot call this RPC directly.
+  // ── T4b: LÓGICA DE COBRO CON HOLD PREVENTIVO ──────────────────────────
+  //
+  // Si creditsHeld > 0 → ya se cobró el máximo antes de lanzar Apify.
+  //   - Si leads_reales < creditsHeld → reembolsamos la diferencia.
+  //   - Si leads_reales >= creditsHeld → el hold ya cubrió todo; no se cobra más.
+  //
+  // Si creditsHeld === 0 (cache hit o entorno local sin hold) →
+  //   comportamiento original: cobrar actualCost ahora.
+  if (creditsHeld > 0) {
+    const refundAmount = creditsHeld - actualCost;
+    if (refundAmount > 0) {
+      const { error: refundErr } = await (supabase as any)
+        .rpc('increment_credits', { p_user_id: searchRaw.user_id, p_amount: refundAmount });
+      if (refundErr) {
+        // El reembolso de diferencia falló — loguear como CRITICAL pero continuar
+        // (el usuario ya pagó el hold y recibió los leads; el saldo se ajusta por soporte)
+        console.error(
+          `[processSearchDataset] CRITICAL: Reembolso de diferencia fallido para user ${searchRaw.user_id}. ` +
+          `Hold: ${creditsHeld}, Costo real: ${actualCost}, Diferencia: ${refundAmount}.`,
+          refundErr
+        );
+      } else {
+        console.log(
+          `[processSearchDataset] Reembolso de diferencia ejecutado: ${refundAmount} crédito(s) devueltos ` +
+          `al usuario ${searchRaw.user_id} (hold: ${creditsHeld}, real: ${actualCost}).`
+        );
+      }
+    }
+    // Hold ya cubrió o fue reembolsada la diferencia — no llamar a decrement_credits
+  } else if (actualCost > 0) {
+    // Flujo original (cache hit, entorno local, o llamadas sin hold preventivo)
     const { data: newBalance, error: rpcError } = await (supabase as any)
       .rpc('decrement_credits', { p_user_id: searchRaw.user_id, p_amount: actualCost });
 
     if (rpcError || newBalance === null) {
-      // User ran out of credits while Apify was scraping — abort, do NOT gift leads.
+      // Usuario quedó sin créditos mientras Apify scrapeaba — abortar
       console.warn(`[processSearchDataset] INSUFFICIENT_CREDITS para user ${searchRaw.user_id}. Abortando guardado de resultados.`);
       await (supabase.from("searches") as any)
         .update({
@@ -198,12 +231,12 @@ export async function processSearchDataset(searchId: string, datasetId: string):
   const originalQuery = (searchRaw.results_json as any)?.originalQuery;
   const originalLocation = (searchRaw.results_json as any)?.originalLocation;
 
-  // FIX P0 — REFUND TRANSACCIONAL
-  // Si el guardado en BD o la escritura a caché falla DESPUÉS de haber
-  // decrementado créditos, devolvemos el dinero atómicamente antes de
-  // propagar el error. El usuario nunca pierde créditos sin recibir datos.
+  // ── T3: REFUND TRANSACCIONAL ESTRICTO ─────────────────────────────────
+  // El SDK de Supabase NO lanza excepciones — devuelve { error } silenciosamente.
+  // Usamos `if (err) throw` para forzar la caída al bloque catch y garantizar
+  // que el refund se ejecute aunque el SDK cambie de comportamiento.
   try {
-    await (supabase.from("searches") as any)
+    const { error: updateErr } = await (supabase.from("searches") as any)
       .update({
         status: "completado",
         total_resultados: prospects.length,
@@ -212,6 +245,9 @@ export async function processSearchDataset(searchId: string, datasetId: string):
       .eq("id", searchId)
       .eq("user_id", searchRaw.user_id);
 
+    // ← THROW EXPLÍCITO: fuerza la ejecución del refund en el catch
+    if (updateErr) throw new Error(`Fallo en update de searches: ${updateErr.message}`);
+
     if (searchRaw.ubicacion) {
       const cacheKey = normalizeSearchKey(searchRaw.query, searchRaw.ubicacion);
       await setCachedSearch(cacheKey, places);
@@ -219,18 +255,19 @@ export async function processSearchDataset(searchId: string, datasetId: string):
   } catch (saveError: any) {
     console.error("[processSearchDataset] Error guardando resultados en BD:", saveError);
 
-    // Refund atómico — solo si se habían descontado créditos
-    if (actualCost > 0) {
+    // Refund atómico — devolver TODO lo cobrado (hold o actualCost)
+    const amountToRefund = creditsHeld > 0 ? creditsHeld : actualCost;
+    if (amountToRefund > 0) {
       try {
         await (supabase as any).rpc('increment_credits', {
           p_user_id: searchRaw.user_id,
-          p_amount: actualCost,
+          p_amount: amountToRefund,
         });
-        console.warn(`[processSearchDataset] REFUND ejecutado: ${actualCost} crédito(s) devueltos al usuario ${searchRaw.user_id}.`);
+        console.warn(`[processSearchDataset] REFUND ejecutado: ${amountToRefund} crédito(s) devueltos al usuario ${searchRaw.user_id}.`);
       } catch (refundError: any) {
         // El refund falló: escalar a soporte (log crítico)
         console.error(
-          `[processSearchDataset] CRITICAL: Refund fallido para user ${searchRaw.user_id}, amount ${actualCost}. Requiere intervención manual.`,
+          `[processSearchDataset] CRITICAL: Refund fallido para user ${searchRaw.user_id}, amount ${amountToRefund}. Requiere intervención manual.`,
           refundError
         );
       }

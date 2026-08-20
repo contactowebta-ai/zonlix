@@ -72,22 +72,31 @@ export async function POST(request: NextRequest) {
     }
 
     const supabase = createServiceClient();
-    const { data: searchRow, error: searchErr } = await (supabase.from("searches") as any)
-      .select("id, status")
+
+    // ── CLAIM ATÓMICO (T2) ────────────────────────────────────────
+    // Un solo UPDATE con WHERE processing_started_at IS NULL garantiza
+    // que, en concurrencia, solo un worker procesa este runId.
+    // Si Postgres no devuelve filas → otro worker ya tomó el trabajo.
+    const { data: claimedRows, error: claimErr } = await (supabase.from("searches") as any)
+      .update({ processing_started_at: new Date().toISOString(), status: "procesando" })
       .eq("apify_run_id", runId)
-      .single();
+      .is("processing_started_at", null)
+      .select("id, credits_held")
+      .limit(1);
 
-    if (searchErr || !searchRow) {
-      console.error(`[Apify Webhook] Error: Búsqueda no encontrada para apify_run_id ${runId}`);
-      return Response.json({ error: "RunId desconocido" }, { status: 404 });
+    if (claimErr) {
+      console.error(`[Apify Webhook] Error en claim atómico para runId ${runId}:`, claimErr);
+      return Response.json({ error: "Error interno al procesar webhook" }, { status: 500 });
     }
 
-    if (searchRow.status === "completado" || searchRow.status === "error") {
-      console.log(`[Apify Webhook] Ignorando webhook repetido para runId ${runId} (status: ${searchRow.status})`);
-      return new Response('Already processed', { status: 200 });
+    if (!claimedRows || claimedRows.length === 0) {
+      // Otro worker ya reclamó este runId (o la búsqueda no existe / ya terminó)
+      console.log(`[Apify Webhook] Claim fallido para runId ${runId} — ya procesado por otro worker.`);
+      return new Response("Already Processing", { status: 200 });
     }
 
-    const searchId = searchRow.id;
+    const searchId: string = claimedRows[0].id;
+    const creditsHeld: number = claimedRows[0].credits_held ?? 0;
 
     if ((!datasetId || datasetId.includes("{{")) && runId && !runId.includes("{{")) {
       console.log(`[Apify Webhook] Fallback: Consultando API de Apify directamente para el run ${runId}...`);
@@ -114,8 +123,9 @@ export async function POST(request: NextRequest) {
 
 
     // Usar la función centralizada para descargar, validar, mockear si es necesario y actualizar Supabase
+    // Se pasa creditsHeld para que processSearchDataset calcule y ejecute el reembolso por diferencia (T4)
     const { processSearchDataset } = await import("@/lib/apify");
-    const totalResultados = await processSearchDataset(searchId, datasetId);
+    const totalResultados = await processSearchDataset(searchId, datasetId, creditsHeld);
 
     console.log(
       `[Apify Webhook] Búsqueda completada — resultados procesados: ${searchId}, total: ${totalResultados}`

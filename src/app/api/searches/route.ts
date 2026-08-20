@@ -144,10 +144,9 @@ export async function POST(request: NextRequest) {
 
     const { query, ubicacion, limit = 20 } = parseResult.data;
 
-    // 2.5 RESERVA FINANCIERA (Hold) — FIX P0
+    // 2.5 RESERVA FINANCIERA (Hold) — FIX P1
     // Calculamos el coste máximo posible ANTES de disparar el scraper.
     // Si el saldo no cubre la operación completa, la rechazamos aquí.
-    // Esto previene el DoS económico: gastar recursos de Apify sin poder cobrar.
     const maxCost = calculateSearchCreditCost(limit);
     if (profile.credits_remaining < maxCost) {
       return Response.json(
@@ -299,9 +298,27 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    // ── T4a: HOLD PREVENTIVO — cobrar ANTES de lanzar Apify ───────────
+    // Descontamos maxCost atómicamente ahora. Si Apify falla, devolvemos.
+    // Si tiene éxito, guardamos credits_held en la fila de búsqueda para
+    // que el webhook calcule el reembolso por diferencia.
+    const serviceClient = createServiceClient();
+    let holdApplied = false;
+    const { data: holdBalance, error: holdErr } = await (serviceClient as any)
+      .rpc('decrement_credits', { p_user_id: user.id, p_amount: maxCost });
+
+    if (holdErr || holdBalance === null) {
+      // El saldo cambió entre el SELECT y el RPC (race condition) — rechazar
+      return Response.json(
+        { error: "INSUFFICIENT_CREDITS", message: "Créditos insuficientes para iniciar la búsqueda." },
+        { status: 402 }
+      );
+    }
+    holdApplied = true;
+    revalidatePath('/', 'layout');
+
     // =====================
     // CACHE MISS — lanzar Apify
-    // (El cobro se hará exclusivamente cuando se procesen y dedupliquen los resultados en el webhook)
     // =====================
     let runId, datasetId;
     try {
@@ -317,7 +334,14 @@ export async function POST(request: NextRequest) {
       datasetId = apifyRes.datasetId;
     } catch (apifyError: any) {
       console.error("[APIFY ERROR]", apifyError);
-      
+
+      // Reembolso inmediato del hold si Apify falló al iniciar
+      if (holdApplied) {
+        await (serviceClient as any)
+          .rpc('increment_credits', { p_user_id: user.id, p_amount: maxCost });
+        revalidatePath('/', 'layout');
+      }
+
       await (supabase.from("searches") as any)
         .update({
           status: "error",
@@ -332,12 +356,13 @@ export async function POST(request: NextRequest) {
       }, { status: 503 });
     }
 
-    // Guardar run y dataset IDs + cambiar status a procesando
+    // Guardar run y dataset IDs + credits_held para el webhook
     await (supabase.from("searches") as any)
       .update({
         status: "procesando",
         apify_run_id: runId,
         apify_dataset_id: datasetId,
+        credits_held: maxCost,
       })
       .eq("id", searchId)
       .eq("user_id", user.id);
