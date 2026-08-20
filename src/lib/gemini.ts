@@ -48,7 +48,6 @@ async function getGenAIClient() {
   const rawKey = process.env.GOOGLE_GEMINI_API_KEY || process.env.GEMINI_API_KEY || '';
   const apiKey = rawKey.replace(/^export\s+/, '').replace(/^["']|["']$/g, '').trim();
 
-  console.log("[GEMINI] Inicializando con Key de longitud:", apiKey.length);
   return new GoogleGenerativeAI(apiKey);
 }
 
@@ -525,13 +524,6 @@ export async function interpretSearchInput({ query, location }: { query: string;
 
     console.warn("[VALIDATOR FALLBACK] IA no disponible. Aprobado por Sanity Check local.");
     return { isValid: true, cleanQuery: query.trim(), cleanLocation: location.trim(), reason: "" };
-
-    return {
-      isValid: false,
-      cleanQuery: query,
-      cleanLocation: location,
-      reason: "Giro comercial o ciudad no reconocidos. Por favor verifica tus datos ingresados."
-    };
   }
 }
 
