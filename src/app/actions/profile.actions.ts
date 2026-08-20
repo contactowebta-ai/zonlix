@@ -136,6 +136,8 @@ export async function reAuditProfile(): Promise<ActionResult<ProfileRow>> {
 
     if (error) {
       console.error("[reAuditProfile] Supabase update error:", error);
+      // Reembolso atómico: Gemini ya respondió pero la DB falló — devolvemos el crédito
+      await (serviceClient as any).rpc('increment_credits', { p_user_id: user.id, p_amount: appliedCost });
       return { success: false, error: "No se pudo guardar el diagnóstico. Intenta de nuevo." };
     }
 

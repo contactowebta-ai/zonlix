@@ -111,7 +111,7 @@ async function handler(request: Request) {
         tier: null,
         puntos_dolor: [],
         markdown_crudo: markdown,
-        resumen_ia: `Error al procesar: ${auditError ?? "desconocido"}`,
+        resumen_ia: "No se pudo generar el diagnóstico en este momento. Por favor, intenta de nuevo más tarde.",
         analizado_at: new Date().toISOString(),
       };
 
